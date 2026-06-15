@@ -49,7 +49,9 @@ namespace P2PFileSharingApp.UI
             btnDenyClient.Click    += BtnDenyClient_Click;
 
             // ── Client Tab Actions ──
-            btnConnect.Click   += BtnConnect_Click;
+            btnConnect.Click       += BtnConnect_Click;
+            btnDisconnect.Click    += BtnDisconnect_Click;
+            btnRefreshRemote.Click += BtnRefreshRemote_Click;
             btnDownload.Click  += BtnDownload_Click;
             btnUpload.Click    += BtnUpload_Click;
             btnDelete.Click    += BtnDelete_Click;
@@ -237,6 +239,21 @@ namespace P2PFileSharingApp.UI
         // CLIENT TAB LOGIC
         // ═══════════════════════════════════════
 
+        private void UpdateClientUI(bool connected)
+        {
+            btnConnect.Enabled = !connected;
+            btnConnect.Text = "🔌  Kết Nối";
+            btnDisconnect.Enabled = connected;
+            btnRefreshRemote.Enabled = connected;
+
+            if (!connected)
+            {
+                lblConnStatus.Text = "● Chưa kết nối";
+                lblConnStatus.ForeColor = System.Drawing.Color.FromArgb(234, 67, 53);
+                tvRemote.Nodes.Clear();
+            }
+        }
+
         private async void BtnConnect_Click(object? sender, EventArgs e)
         {
             _client?.Disconnect();
@@ -248,7 +265,6 @@ namespace P2PFileSharingApp.UI
             if (!int.TryParse(txtPort.Text.Trim(), out int port)) port = 8888;
 
             btnConnect.Enabled = false;
-            btnConnect.Text    = "Đang kết nối...";
             lblConnStatus.Text      = "● Đang kết nối...";
             lblConnStatus.ForeColor = System.Drawing.Color.FromArgb(251, 188, 4);
 
@@ -258,18 +274,30 @@ namespace P2PFileSharingApp.UI
             {
                 lblConnStatus.Text      = $"● Đã kết nối: {ip}:{port}";
                 lblConnStatus.ForeColor = System.Drawing.Color.FromArgb(52, 168, 83);
-                btnConnect.Text         = "🔄  Ngắt & Thử Lại";
+                UpdateClientUI(true);
                 await RefreshRemoteTreeAsync();
             }
             else
             {
-                lblConnStatus.Text      = "● Kết nối thất bại";
-                lblConnStatus.ForeColor = System.Drawing.Color.FromArgb(234, 67, 53);
-                btnConnect.Text         = "🔌  Kết Nối";
+                UpdateClientUI(false);
                 MessageBox.Show("Không thể kết nối:\n" + msg, "Lỗi kết nối",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-            btnConnect.Enabled = true;
+        }
+
+        private void BtnDisconnect_Click(object? sender, EventArgs e)
+        {
+            _client?.Disconnect();
+            UpdateClientUI(false);
+            AppendLog("[CLIENT] Đã ngắt kết nối.");
+        }
+
+        private async void BtnRefreshRemote_Click(object? sender, EventArgs e)
+        {
+            if (!EnsureClientConnected()) return;
+            btnRefreshRemote.Enabled = false;
+            await RefreshRemoteTreeAsync();
+            btnRefreshRemote.Enabled = true;
         }
 
         private async void BtnDownload_Click(object? sender, EventArgs e)

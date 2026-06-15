@@ -62,6 +62,8 @@ namespace P2PFileSharingApp.UI
             this.btnRename           = new System.Windows.Forms.Button();
             this.btnMkDir            = new System.Windows.Forms.Button();
             this.btnBackRemote       = new System.Windows.Forms.Button();
+            this.btnDisconnect       = new System.Windows.Forms.Button();
+            this.btnRefreshRemote    = new System.Windows.Forms.Button();
 
             this.panelTopBar.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.splitServer)).BeginInit();
@@ -147,7 +149,6 @@ namespace P2PFileSharingApp.UI
             // PANEL SERVER (Tab 1)
             // ──────────────────────────────────
             this.panelServer.Dock      = System.Windows.Forms.DockStyle.Fill;
-            this.panelServer.MinimumSize = new System.Drawing.Size(900, 850);
             this.panelServer.Padding   = new System.Windows.Forms.Padding(12, 10, 12, 10);
             this.panelServer.BackColor = System.Drawing.Color.FromArgb(248, 249, 250);
             this.panelServer.Controls.Add(this.splitServer);
@@ -313,12 +314,11 @@ namespace P2PFileSharingApp.UI
             // PANEL CLIENT (Tab 2)
             // ──────────────────────────────────
             this.panelClient.Dock      = System.Windows.Forms.DockStyle.Fill;
-            this.panelClient.MinimumSize = new System.Drawing.Size(900, 850);
             this.panelClient.Padding   = new System.Windows.Forms.Padding(12, 10, 12, 10);
             this.panelClient.BackColor = System.Drawing.Color.FromArgb(248, 249, 250);
             this.panelClient.Visible   = false;
-            this.panelClient.Controls.Add(this.panelConnectBar);
             this.panelClient.Controls.Add(this.grpRemoteFiles);
+            this.panelClient.Controls.Add(this.panelConnectBar);
 
             // panelConnectBar
             this.panelConnectBar.Dock       = System.Windows.Forms.DockStyle.Top;
@@ -330,6 +330,8 @@ namespace P2PFileSharingApp.UI
             this.panelConnectBar.Controls.Add(this.lblPort);
             this.panelConnectBar.Controls.Add(this.txtPort);
             this.panelConnectBar.Controls.Add(this.btnConnect);
+            this.panelConnectBar.Controls.Add(this.btnDisconnect);
+            this.panelConnectBar.Controls.Add(this.btnRefreshRemote);
             this.panelConnectBar.Controls.Add(this.lblConnStatus);
 
             this.lblConnectTo.Text      = "Địa chỉ IP:";
@@ -369,11 +371,35 @@ namespace P2PFileSharingApp.UI
             this.btnConnect.Cursor    = System.Windows.Forms.Cursors.Hand;
             this.btnConnect.Name      = "btnConnect";
 
+            this.btnDisconnect.Text      = "⏹  Ngắt";
+            this.btnDisconnect.BackColor = System.Drawing.Color.FromArgb(234, 67, 53);
+            this.btnDisconnect.ForeColor = System.Drawing.Color.White;
+            this.btnDisconnect.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnDisconnect.FlatAppearance.BorderSize = 0;
+            this.btnDisconnect.Font      = new System.Drawing.Font("Segoe UI", 9.5f, System.Drawing.FontStyle.Bold);
+            this.btnDisconnect.Size      = new System.Drawing.Size(120, 36);
+            this.btnDisconnect.Location  = new System.Drawing.Point(550, 13);
+            this.btnDisconnect.Cursor    = System.Windows.Forms.Cursors.Hand;
+            this.btnDisconnect.Name      = "btnDisconnect";
+            this.btnDisconnect.Enabled   = false;
+
+            this.btnRefreshRemote.Text      = "🔄  Làm Mới";
+            this.btnRefreshRemote.BackColor = System.Drawing.Color.FromArgb(52, 168, 83);
+            this.btnRefreshRemote.ForeColor = System.Drawing.Color.White;
+            this.btnRefreshRemote.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnRefreshRemote.FlatAppearance.BorderSize = 0;
+            this.btnRefreshRemote.Font      = new System.Drawing.Font("Segoe UI", 9.5f, System.Drawing.FontStyle.Bold);
+            this.btnRefreshRemote.Size      = new System.Drawing.Size(120, 36);
+            this.btnRefreshRemote.Location  = new System.Drawing.Point(676, 13);
+            this.btnRefreshRemote.Cursor    = System.Windows.Forms.Cursors.Hand;
+            this.btnRefreshRemote.Name      = "btnRefreshRemote";
+            this.btnRefreshRemote.Enabled   = false;
+
             this.lblConnStatus.Text      = "● Chưa kết nối";
             this.lblConnStatus.ForeColor = System.Drawing.Color.FromArgb(234, 67, 53);
             this.lblConnStatus.Font      = new System.Drawing.Font("Segoe UI", 9f);
             this.lblConnStatus.AutoSize  = true;
-            this.lblConnStatus.Location  = new System.Drawing.Point(560, 22);
+            this.lblConnStatus.Location  = new System.Drawing.Point(806, 22);
 
             // GroupBox: Remote Files
             this.grpRemoteFiles.Text      = "🌐  Tài Nguyên Từ Xa";
@@ -492,6 +518,8 @@ namespace P2PFileSharingApp.UI
         private System.Windows.Forms.Button btnDelete;
         private System.Windows.Forms.Button btnRename;
         private System.Windows.Forms.Button btnMkDir;
+        private System.Windows.Forms.Button btnDisconnect;
+        private System.Windows.Forms.Button btnRefreshRemote;
         private System.Windows.Forms.Button btnBackRemote;
     }
 }

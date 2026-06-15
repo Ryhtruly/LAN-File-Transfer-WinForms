@@ -208,15 +208,43 @@ namespace P2PFileSharingApp.Network
             string? fullPath = FileManager.GetSafePath(SharedFolderPath, relativePath);
             if (fullPath == null) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Đường dẫn không hợp lệ."); return; }
 
-            byte[]? data = FileManager.ReadFileSafe(fullPath);
-            if (data == null)
+            if (!File.Exists(fullPath))
             {
                 writer.WriteLine($"{ProtocolMessages.RES_ERROR}|File không tồn tại.");
                 return;
             }
-            writer.WriteLine($"{ProtocolMessages.RES_OK}|{data.Length}");
-            stream.Write(data, 0, data.Length);
-            stream.Flush();
+
+            var fi = new FileInfo(fullPath);
+            writer.WriteLine($"{ProtocolMessages.RES_OK}|{fi.Length}");
+
+            try
+            {
+                // Stream file in 8KB chunks (Fault Tolerance strategy)
+                using (var fs = File.OpenRead(fullPath))
+                {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    long totalSent = 0;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                    while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        stream.Write(buffer, 0, bytesRead);
+                        totalSent += bytesRead;
+
+                        // Log every 1MB with progress %
+                        if (totalSent % (1024 * 1024) == 0 || fs.Position == fs.Length)
+                        {
+                            int percent = (int)((totalSent * 100) / fi.Length);
+                            double mbps = (totalSent / (1024.0 * 1024.0)) / sw.Elapsed.TotalSeconds;
+                            Log($"📤 {relativePath} | {percent}% | {totalSent / (1024.0 * 1024.0):F1}MB / {fi.Length / (1024.0 * 1024.0):F1}MB | {mbps:F2}MB/s");
+                        }
+                    }
+                    stream.Flush();
+                    Log($"✅ Download hoàn tất: {relativePath} ({totalSent} bytes)");
+                }
+            }
+            catch (Exception ex) { Log($"❌ Lỗi download {relativePath}: {ex.Message}"); }
         }
 
         private void HandleUpload(string relativePath, string sizeStr, NetworkStream stream, StreamWriter writer)
@@ -224,26 +252,61 @@ namespace P2PFileSharingApp.Network
             string? fullPath = FileManager.GetSafePath(SharedFolderPath, relativePath);
             if (fullPath == null) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Đường dẫn không hợp lệ."); return; }
 
-            if (!int.TryParse(sizeStr, out int fileSize))
+            if (!long.TryParse(sizeStr, out long fileSize))
             {
                 writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Kích thước file không hợp lệ.");
                 return;
             }
             writer.WriteLine($"{ProtocolMessages.RES_OK}|READY");
 
-            byte[] buffer = new byte[fileSize];
-            int totalRead = 0;
-            while (totalRead < fileSize)
+            try
             {
-                int read = stream.Read(buffer, totalRead, fileSize - totalRead);
-                if (read == 0) break;
-                totalRead += read;
-            }
+                // Tạo directory nếu cần
+                string? dir = Path.GetDirectoryName(fullPath);
+                if (dir != null && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
 
-            bool ok = FileManager.WriteFileSafe(fullPath, buffer);
-            writer.WriteLine(ok
-                ? $"{ProtocolMessages.RES_OK}|Upload thành công."
-                : $"{ProtocolMessages.RES_ERROR}|Không thể ghi file.");
+                // Stream file in 8KB chunks (Fault Tolerance strategy)
+                using (var fs = File.Create(fullPath))
+                {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    long totalReceived = 0;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                    while (totalReceived < fileSize)
+                    {
+                        int toRead = (int)Math.Min(buffer.Length, fileSize - totalReceived);
+                        bytesRead = stream.Read(buffer, 0, toRead);
+
+                        if (bytesRead == 0) break;
+
+                        fs.Write(buffer, 0, bytesRead);
+                        totalReceived += bytesRead;
+
+                        // Log every 1MB with progress %
+                        if (totalReceived % (1024 * 1024) == 0 || totalReceived == fileSize)
+                        {
+                            int percent = (int)((totalReceived * 100) / fileSize);
+                            double mbps = (totalReceived / (1024.0 * 1024.0)) / sw.Elapsed.TotalSeconds;
+                            Log($"📥 {relativePath} | {percent}% | {totalReceived / (1024.0 * 1024.0):F1}MB / {fileSize / (1024.0 * 1024.0):F1}MB | {mbps:F2}MB/s");
+                        }
+                    }
+
+                    bool ok = totalReceived == fileSize;
+                    writer.WriteLine(ok
+                        ? $"{ProtocolMessages.RES_OK}|Upload thành công."
+                        : $"{ProtocolMessages.RES_ERROR}|Upload không hoàn tất.");
+                    Log(ok
+                        ? $"✅ Upload hoàn tất: {relativePath} ({totalReceived} bytes)"
+                        : $"⚠️ Upload incomplete: {totalReceived} / {fileSize} bytes");
+                }
+            }
+            catch (Exception ex)
+            {
+                writer.WriteLine($"{ProtocolMessages.RES_ERROR}|{ex.Message}");
+                Log($"❌ Lỗi upload {relativePath}: {ex.Message}");
+            }
         }
 
         private void HandleDelete(string relativePath, StreamWriter writer)

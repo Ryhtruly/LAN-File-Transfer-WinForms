@@ -87,19 +87,42 @@ namespace P2PFileSharingApp.Network
                 if (parts[0] != ProtocolMessages.RES_OK)
                     return (false, parts.Length > 1 ? parts[1] : "Lỗi không xác định.");
 
-                int fileSize = int.Parse(parts[1]);
-                byte[] buffer = new byte[fileSize];
-                int totalRead = 0;
-                while (totalRead < fileSize)
-                {
-                    int read = await _stream!.ReadAsync(buffer, totalRead, fileSize - totalRead);
-                    if (read == 0) break;
-                    totalRead += read;
-                }
+                if (!long.TryParse(parts[1], out long fileSize))
+                    return (false, "Kích thước file không hợp lệ.");
 
                 string savePath = Path.Combine(saveFolder, Path.GetFileName(remotePath));
-                File.WriteAllBytes(savePath, buffer);
-                return (true, $"Đã tải về: {savePath}");
+
+                // Stream file in 8KB chunks (Fault Tolerance strategy)
+                long totalReceived = 0;
+                const int BUFFER_SIZE = 8192;
+                byte[] buffer = new byte[BUFFER_SIZE];
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+                using (var fs = File.Create(savePath))
+                {
+                    int bytesRead;
+                    while (totalReceived < fileSize)
+                    {
+                        int toRead = (int)Math.Min(buffer.Length, fileSize - totalReceived);
+                        bytesRead = await _stream!.ReadAsync(buffer, 0, toRead);
+
+                        if (bytesRead == 0) break;
+
+                        fs.Write(buffer, 0, bytesRead);
+                        totalReceived += bytesRead;
+
+                        // Log every 1MB with progress %
+                        if (totalReceived % (1024 * 1024) == 0 || totalReceived == fileSize)
+                        {
+                            int percent = (int)((totalReceived * 100) / fileSize);
+                            double mbps = (totalReceived / (1024.0 * 1024.0)) / stopwatch.Elapsed.TotalSeconds;
+                            Log($"⬇ {remotePath} | {percent}% | {totalReceived / (1024.0 * 1024.0):F1}MB / {fileSize / (1024.0 * 1024.0):F1}MB | {mbps:F2}MB/s");
+                        }
+                    }
+                }
+                stopwatch.Stop();
+
+                return (totalReceived == fileSize, $"Đã tải về: {savePath}");
             }
             catch (Exception ex) { return (false, ex.Message); }
         }
@@ -108,21 +131,43 @@ namespace P2PFileSharingApp.Network
         {
             try
             {
-                byte[] data = File.ReadAllBytes(localFilePath);
-                string fileName = Path.GetFileName(localFilePath);
+                var fi = new FileInfo(localFilePath);
+                string fileName = fi.Name;
                 string remotePath = string.IsNullOrEmpty(remoteDir) ? fileName : $"{remoteDir}/{fileName}";
 
                 string response = await SendLineAsync(
-                    $"{ProtocolMessages.REQ_UPLOAD}{ProtocolMessages.SEPARATOR}{remotePath}{ProtocolMessages.SEPARATOR}{data.Length}");
+                    $"{ProtocolMessages.REQ_UPLOAD}{ProtocolMessages.SEPARATOR}{remotePath}{ProtocolMessages.SEPARATOR}{fi.Length}");
 
                 var parts = response.Split(new char[] { ProtocolMessages.SEPARATOR }, 2);
                 if (parts[0] != ProtocolMessages.RES_OK)
                     return (false, parts.Length > 1 ? parts[1] : "Server từ chối.");
 
-                await _stream!.WriteAsync(data, 0, data.Length);
-                await _stream.FlushAsync();
+                // Stream file in 8KB chunks (Fault Tolerance strategy)
+                const int BUFFER_SIZE = 8192;
+                byte[] buffer = new byte[BUFFER_SIZE];
+                long totalSent = 0;
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-                // Đợi ACK cuối
+                using (var fs = File.OpenRead(localFilePath))
+                {
+                    int bytesRead;
+                    while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        await _stream!.WriteAsync(buffer, 0, bytesRead);
+                        totalSent += bytesRead;
+
+                        // Log every 1MB with progress %
+                        if (totalSent % (1024 * 1024) == 0 || fs.Position == fs.Length)
+                        {
+                            int percent = (int)((totalSent * 100) / fi.Length);
+                            double mbps = (totalSent / (1024.0 * 1024.0)) / stopwatch.Elapsed.TotalSeconds;
+                            Log($"⬆ {fileName} | {percent}% | {totalSent / (1024.0 * 1024.0):F1}MB / {fi.Length / (1024.0 * 1024.0):F1}MB | {mbps:F2}MB/s");
+                        }
+                    }
+                }
+                stopwatch.Stop();
+
+                // Đợi ACK từ server
                 string ack = await _reader!.ReadLineAsync() ?? string.Empty;
                 var ackParts = ack.Split(new char[] { ProtocolMessages.SEPARATOR }, 2);
                 bool ok = ackParts[0] == ProtocolMessages.RES_OK;
