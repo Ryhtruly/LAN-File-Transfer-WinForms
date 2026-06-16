@@ -1,0 +1,17 @@
+# Agent/skill files
+.agents/
+skills-lock.json
+
+# Markdown docs
+*.md
+
+# Build output
+.build-check/
+bin/
+obj/
+
+# IDE / user files
+*.user
+.vs/
+*.suo
+*.cache
