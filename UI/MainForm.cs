@@ -39,7 +39,6 @@ public partial class MainForm : Form
     private bool isConnected;
     private bool serverRunning;
 
-    private TabControl mainTabs = null!;
     private Panel pageHost = null!;
     private Button btnServerTab = null!;
     private Button btnClientTab = null!;
@@ -47,10 +46,6 @@ public partial class MainForm : Form
     private Control clientView = null!;
     private ServerStatusIndicator lblServerState = null!;
     private Button btnToggleServer = null!;
-    private Button btnAddSharedFolder = null!;
-    private Button btnRemoveSharedFolder = null!;
-    private Button btnRefreshServerFiles = null!;
-    private ListView lvSharedFolders = null!;
     private ListView lvServerFiles = null!;
     private ListView lvPermissions = null!;
     private ListView lvServerLogs = null!;
@@ -63,7 +58,7 @@ public partial class MainForm : Form
     private TextBox txtDisplayName = null!;
     private ComboBox cboServers = null!;
     private NumericUpDown numPort = null!;
-    private CheckBox chkDemoMode = null!;
+    
     private Button btnSavePeer = null!;
     private Button btnConnect = null!;
     private ProgressBar progressConnect = null!;
@@ -339,7 +334,7 @@ public partial class MainForm : Form
 
         Label title = SectionTitle("Server của máy mình");
         panel.Controls.Add(title, 0, 0);
-        panel.SetColumnSpan(title, 5);
+        panel.SetColumnSpan(title, 4);
 
         lblServerState = new ServerStatusIndicator
         {
@@ -426,7 +421,7 @@ public partial class MainForm : Form
 
     private Control BuildPermissionEditor()
     {
-        TableLayoutPanel editor = CreatePanel(1, 4);
+        TableLayoutPanel editor = CreatePanel(2, 4);
         editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         editor.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
@@ -558,17 +553,6 @@ public partial class MainForm : Form
         };
         panel.Controls.Add(btnScanLAN, 5, 2);
 
-        chkDemoMode = new CheckBox
-        {
-            Dock = DockStyle.Fill,
-            Text = "demo",
-            Checked = true,
-            TextAlign = ContentAlignment.MiddleLeft,
-            ForeColor = Ink
-        };
-        toolTips.SetToolTip(chkDemoMode, "Bật để mô phỏng kết nối khi chưa có server thật.");
-        panel.Controls.Add(chkDemoMode, 5, 2);
-
         btnConnect = PrimaryButton("Kết nối");
         btnConnect.Click += btnConnect_Click;
         panel.Controls.Add(btnConnect, 6, 2);
@@ -613,19 +597,27 @@ public partial class MainForm : Form
 
     private Control BuildLocalPanel()
     {
-        TableLayoutPanel panel = CreatePanel(2, 2);
+        TableLayoutPanel panel = CreatePanel(3, 2);
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
 
         panel.Controls.Add(SectionTitle("Thư mục để tải về"), 0, 0);
+        
+        Button btnOpenLocal = SecondaryButton("Mở thư mục");
+        btnOpenLocal.Click += (_, _) => {
+            try { System.Diagnostics.Process.Start("explorer.exe", localRoot); } catch {}
+        };
+        panel.Controls.Add(btnOpenLocal, 1, 0);
+
         btnChooseFolder = SecondaryButton("Chọn thư mục");
         btnChooseFolder.Click += (_, _) => ChooseLocalFolder();
-        panel.Controls.Add(btnChooseFolder, 1, 0);
+        panel.Controls.Add(btnChooseFolder, 2, 0);
 
         lvLocalFiles = CreateFileListView();
-        panel.SetColumnSpan(lvLocalFiles, 2);
+        panel.SetColumnSpan(lvLocalFiles, 3);
         panel.Controls.Add(lvLocalFiles, 0, 1);
         return panel;
     }
@@ -1403,7 +1395,7 @@ public partial class MainForm : Form
         if (!TryReadPeerInputs(out PeerInfo? peer) || peer == null)
             return;
 
-        if (chkDemoMode != null) chkDemoMode.Enabled = false;
+        
         btnConnect.Text = "Đang kết nối...";
         progressConnect.Visible = true;
         progressConnect.Style = ProgressBarStyle.Marquee;
@@ -1414,19 +1406,12 @@ public partial class MainForm : Form
 
         try
         {
-            if (chkDemoMode.Checked)
-            {
-                await Task.Delay(900, connectCts.Token);
-            }
-            else
-            {
-                _client?.Disconnect();
-                _client = new P2PClient();
-                _client.OnLog += msg => AddClientLog(msg, LogType.Info);
-                
-                var res = await _client.ConnectAsync(peer.IpAddress, peer.Port);
-                if (!res.ok) throw new Exception(res.message);
-            }
+            _client?.Disconnect();
+            _client = new P2PClient();
+            _client.OnLog += msg => AddClientLog(msg, LogType.Info);
+            
+            var res = await _client.ConnectAsync(peer.IpAddress, peer.Port);
+            if (!res.ok) throw new Exception(res.message);
 
             isConnected = true;
             lblConnection.Text = "Đã kết nối";
@@ -1459,7 +1444,7 @@ public partial class MainForm : Form
             progressConnect.Style = ProgressBarStyle.Blocks;
             progressConnect.Visible = false;
             btnConnect.Text = "Kết nối";
-            if (chkDemoMode != null) chkDemoMode.Enabled = true;
+            
             UpdateActionState();
         }
     }
@@ -1730,7 +1715,7 @@ public partial class MainForm : Form
 
     private void UpdateActionState()
     {
-        bool allowRemoteActions = isConnected || chkDemoMode.Checked;
+        bool allowRemoteActions = isConnected;
         btnUpload.Enabled = allowRemoteActions;
         btnDownload.Enabled = allowRemoteActions;
         btnDelete.Enabled = allowRemoteActions;
@@ -1881,16 +1866,6 @@ public partial class MainForm : Form
         }
 
         return Path.Combine(directory, $"{fileName}-{DateTime.Now:yyyyMMddHHmmss}{extension}");
-    }
-
-    private void FitSharedFolderColumns()
-    {
-        if (lvSharedFolders.Columns.Count < 2 || lvSharedFolders.ClientSize.Width <= 0)
-            return;
-
-        int width = Math.Max(430, lvSharedFolders.ClientSize.Width - 8);
-        lvSharedFolders.Columns[0].Width = 150;
-        lvSharedFolders.Columns[1].Width = Math.Max(280, width - 150);
     }
 
     private void FitPermissionColumns()
