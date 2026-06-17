@@ -240,10 +240,13 @@ namespace P2PFileSharingApp.Network
                 totalRead += read;
             }
 
-            bool ok = FileManager.WriteFileSafe(fullPath, buffer);
-            writer.WriteLine(ok
-                ? $"{ProtocolMessages.RES_OK}|Upload thành công."
-                : $"{ProtocolMessages.RES_ERROR}|Không thể ghi file.");
+            bool ok = FileManager.WriteFileSafe(fullPath, buffer, out bool wasLocked);
+            if (wasLocked)
+                writer.WriteLine($"{ProtocolMessages.RES_LOCKED}|File đang được người khác sử dụng, vui lòng thử lại sau.");
+            else if (ok)
+                writer.WriteLine($"{ProtocolMessages.RES_OK}|Upload thành công.");
+            else
+                writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Không thể ghi file.");
         }
 
         private void HandleDelete(string relativePath, StreamWriter writer)

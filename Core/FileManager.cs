@@ -10,7 +10,12 @@ namespace P2PFileSharingApp.Core
     /// Quản lý tất cả các thao tác file I/O với cơ chế khóa đa luồng (ReaderWriterLockSlim).
     /// - Nhiều client có thể đọc (Download) cùng lúc.
     /// - Chỉ 1 client được ghi (Upload/Delete/Rename) tại một thời điểm.
-    /// - Nếu file đang được Đọc, lệnh Xóa/Sửa sẽ bị chặn và trả về RES_LOCKED.
+    /// - Nếu file đang được Đọc/Ghi, lệnh ghi khác sẽ bị từ chối ngay (RES_LOCKED).
+    ///
+    /// Tối ưu hóa:
+    /// - Sử dụng TryEnterWriteLock(0) thay vì kiểm tra thủ công _activeReaders (Fix B).
+    /// - Dọn dẹp khóa rác khi file bị xóa để tránh rò rỉ bộ nhớ (Fix C).
+    /// - Khóa cả đường dẫn nguồn và đích khi đổi tên để tránh xung đột (Fix D).
     /// </summary>
     public static class FileManager
     {
@@ -18,19 +23,13 @@ namespace P2PFileSharingApp.Core
         private static readonly ConcurrentDictionary<string, ReaderWriterLockSlim> _fileLocks
             = new ConcurrentDictionary<string, ReaderWriterLockSlim>();
 
-        // Đếm số lượng ReadLock đang active để phát hiện xung đột
-        private static readonly ConcurrentDictionary<string, int> _activeReaders
-            = new ConcurrentDictionary<string, int>();
+        // [Fix B] Đã xóa _activeReaders vì ReaderWriterLockSlim đã tự đếm qua CurrentReadCount.
 
         private static string NormalizeKey(string filePath)
             => filePath.ToLowerInvariant();
 
         private static ReaderWriterLockSlim GetLock(string filePath)
             => _fileLocks.GetOrAdd(NormalizeKey(filePath), _ => new ReaderWriterLockSlim());
-
-        /// <summary>Kiểm tra file đang có ai đọc không (để phát hiện xung đột trước khi xóa/sửa).</summary>
-        public static bool IsFileBeingRead(string filePath)
-            => _activeReaders.GetOrAdd(NormalizeKey(filePath), 0) > 0;
 
         /// <summary>Ghép nối và xác thực đường dẫn, ngăn chặn Directory Traversal (../).</summary>
         public static string? GetSafePath(string sharedRoot, string relativePath)
@@ -79,32 +78,46 @@ namespace P2PFileSharingApp.Core
 
         // ─────────────────── READ (DOWNLOAD) ───────────────────
 
-        /// <summary>Đọc toàn bộ byte của file với ReadLock (nhiều người có thể đọc cùng lúc).</summary>
+        /// <summary>
+        /// Đọc toàn bộ byte của file với ReadLock (nhiều người có thể đọc cùng lúc).
+        /// [Fix B] Không cần đếm _activeReaders thủ công nữa – ReaderWriterLockSlim
+        /// tự động theo dõi số ReadLock đang active qua thuộc tính CurrentReadCount.
+        /// </summary>
         public static byte[]? ReadFileSafe(string filePath)
         {
-            var key = NormalizeKey(filePath);
             var lk = GetLock(filePath);
-
             lk.EnterReadLock();
-            _activeReaders.AddOrUpdate(key, 1, (_, v) => v + 1);
             try
             {
+                // thêm dòng này nếu muốn test, do truyền qua mạng LAN rất nhanh
+                // System.Threading.Thread.Sleep(8000);
                 return File.Exists(filePath) ? File.ReadAllBytes(filePath) : null;
             }
             finally
             {
-                _activeReaders.AddOrUpdate(key, 0, (_, v) => Math.Max(0, v - 1));
                 lk.ExitReadLock();
             }
         }
 
         // ─────────────────── WRITE (UPLOAD) ───────────────────
 
-        /// <summary>Ghi byte vào file với WriteLock. Sẽ bị chặn nếu có ReadLock đang giữ.</summary>
-        public static bool WriteFileSafe(string filePath, byte[] data)
+        /// <summary>
+        /// Ghi byte vào file với WriteLock.
+        /// [Fix B] Sử dụng TryEnterWriteLock(0): nếu file đang bị khóa (đọc hoặc ghi),
+        /// trả về false + wasLocked = true ngay lập tức thay vì đứng chờ vô hạn.
+        /// </summary>
+        public static bool WriteFileSafe(string filePath, byte[] data, out bool wasLocked)
         {
+            wasLocked = false;
             var lk = GetLock(filePath);
-            lk.EnterWriteLock();
+
+            // TryEnterWriteLock(0): thử lấy WriteLock ngay, nếu đang có ai đọc/ghi → trả false
+            if (!lk.TryEnterWriteLock(0))
+            {
+                wasLocked = true;
+                return false;
+            }
+
             try
             {
                 File.WriteAllBytes(filePath, data);
@@ -117,33 +130,39 @@ namespace P2PFileSharingApp.Core
         // ─────────────────── DELETE ───────────────────
 
         /// <summary>
-        /// Xóa file HOẶC thư mục với WriteLock. Nếu đang bị ReadLock (ai đó đang tải),
-        /// trả về false và caller nên trả về RES_LOCKED cho client.
+        /// Xóa file HOẶC thư mục với WriteLock.
+        /// [Fix B] Sử dụng TryEnterWriteLock(0) thay vì kiểm tra thủ công IsFileBeingRead().
+        /// [Fix C] Sau khi xóa thành công, dọn dẹp khóa rác khỏi _fileLocks.
         /// </summary>
         public static bool TryDeleteFileSafe(string path, out bool wasLocked)
         {
             wasLocked = false;
-            if (IsFileBeingRead(path))
+            var key = NormalizeKey(path);
+            var lk = GetLock(path);
+
+            // [Fix B] TryEnterWriteLock(0): thử lấy WriteLock ngay lập tức.
+            // Nếu đang có ReadLock (ai đó đang tải) hoặc WriteLock (ai đó đang ghi) → trả false.
+            // Không cần pre-check hay double-check thủ công nữa!
+            if (!lk.TryEnterWriteLock(0))
             {
                 wasLocked = true;
                 return false;
             }
 
-            var lk = GetLock(path);
-            lk.EnterWriteLock();
             try
             {
-                // Double-check sau khi lấy WriteLock
-                if (IsFileBeingRead(path)) { wasLocked = true; return false; }
-
                 if (File.Exists(path))
                 {
                     File.Delete(path);
+                    // [Fix C] Dọn dẹp khóa rác: file đã xóa → khóa không còn cần thiết
+                    _fileLocks.TryRemove(key, out _);
                     return true;
                 }
                 else if (Directory.Exists(path))
                 {
                     Directory.Delete(path, recursive: true);
+                    // [Fix C] Dọn dẹp khóa rác cho thư mục
+                    _fileLocks.TryRemove(key, out _);
                     return true;
                 }
                 return false;
@@ -154,34 +173,69 @@ namespace P2PFileSharingApp.Core
 
         // ─────────────────── RENAME ───────────────────
 
-        /// <summary>Đổi tên file HOẶC thư mục với WriteLock.</summary>
+        /// <summary>
+        /// Đổi tên file HOẶC thư mục với WriteLock cho CẢ đường dẫn nguồn VÀ đích.
+        /// [Fix D] Khóa cả 2 đường dẫn theo thứ tự alphabet để tránh Deadlock.
+        /// [Fix C] Sau khi đổi tên, dọn dẹp khóa cũ (nguồn) khỏi _fileLocks.
+        /// </summary>
         public static bool TryRenameFileSafe(string path, string newName, out bool wasLocked)
         {
             wasLocked = false;
-            if (IsFileBeingRead(path)) { wasLocked = true; return false; }
 
-            var lk = GetLock(path);
-            lk.EnterWriteLock();
-            try
+            // Tính đường dẫn đích trước khi lấy khóa
+            string? parentDir = Path.GetDirectoryName(path);
+            if (parentDir == null) return false;
+            string newPath = Path.Combine(parentDir, newName);
+
+            var sourceKey = NormalizeKey(path);
+            var destKey = NormalizeKey(newPath);
+
+            // Nếu tên không thay đổi → không cần làm gì
+            if (sourceKey == destKey) return true;
+
+            // [Fix D] Luôn khóa theo thứ tự alphabet để tránh Deadlock khi 2 thread
+            // đổi tên chéo nhau (A→B và B→A cùng lúc).
+            bool sourceFirst = string.Compare(sourceKey, destKey, StringComparison.Ordinal) < 0;
+            var lk1 = sourceFirst ? GetLock(path) : GetLock(newPath);     // Khóa thứ 1 (alphabet nhỏ hơn)
+            var lk2 = sourceFirst ? GetLock(newPath) : GetLock(path);     // Khóa thứ 2 (alphabet lớn hơn)
+
+            // Lấy WriteLock cho khóa thứ nhất
+            if (!lk1.TryEnterWriteLock(0))
             {
-                if (IsFileBeingRead(path)) { wasLocked = true; return false; }
-
-                if (File.Exists(path))
-                {
-                    string newPath = Path.Combine(Path.GetDirectoryName(path)!, newName);
-                    File.Move(path, newPath);
-                    return true;
-                }
-                else if (Directory.Exists(path))
-                {
-                    string newPath = Path.Combine(Directory.GetParent(path)!.FullName, newName);
-                    Directory.Move(path, newPath);
-                    return true;
-                }
+                wasLocked = true;
                 return false;
             }
-            catch { return false; }
-            finally { lk.ExitWriteLock(); }
+
+            try
+            {
+                // Lấy WriteLock cho khóa thứ hai
+                if (!lk2.TryEnterWriteLock(0))
+                {
+                    wasLocked = true;
+                    return false;
+                }
+
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Move(path, newPath);
+                        // [Fix C] Dọn dẹp khóa cũ (khóa mới sẽ được tạo lazy khi cần)
+                        _fileLocks.TryRemove(sourceKey, out _);
+                        return true;
+                    }
+                    else if (Directory.Exists(path))
+                    {
+                        Directory.Move(path, newPath);
+                        _fileLocks.TryRemove(sourceKey, out _);
+                        return true;
+                    }
+                    return false;
+                }
+                catch { return false; }
+                finally { lk2.ExitWriteLock(); }
+            }
+            finally { lk1.ExitWriteLock(); }
         }
 
         // ─────────────────── CREATE FOLDER ───────────────────
