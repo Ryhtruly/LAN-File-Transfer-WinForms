@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace P2PFileSharingApp.Core
 {
@@ -250,6 +251,104 @@ namespace P2PFileSharingApp.Core
                 return true;
             }
             catch { return false; }
+        }
+
+        // ─────────────────── STREAM-BASED I/O (BUFFER 8KB) ───────────────────
+
+        /// <summary>
+        /// Đọc file theo streaming (8KB chunks) thay vì ReadAllBytes.
+        /// Áp dụng: Fault Tolerance + Stream-oriented communication
+        /// RAM = 8KB dù file bao lớn.
+        /// </summary>
+        public static async Task<bool> ReadFileStreamAsync(
+            string filePath,
+            Func<Stream> getNetworkStream,  // Lấy NetworkStream để ghi dữ liệu
+            Action<long, long>? onProgress = null)  // (bytesSent, totalBytes)
+        {
+            var lk = GetLock(filePath);
+            lk.EnterReadLock();
+            try
+            {
+                if (!File.Exists(filePath)) return false;
+
+                var fi = new FileInfo(filePath);
+                long totalSize = fi.Length;
+                long bytesSent = 0;
+                const int BUFFER_SIZE = 8192;
+                byte[] buffer = new byte[BUFFER_SIZE];
+
+                using (var fs = File.OpenRead(filePath))
+                using (var networkStream = getNetworkStream())
+                {
+                    int bytesRead;
+                    while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        await networkStream.WriteAsync(buffer, 0, bytesRead);
+                        bytesSent += bytesRead;
+                        onProgress?.Invoke(bytesSent, totalSize);
+                    }
+                }
+                return true;
+            }
+            catch { return false; }
+            finally
+            {
+                lk.ExitReadLock();
+            }
+        }
+
+        /// <summary>
+        /// Ghi file theo streaming (8KB chunks) thay vì WriteAllBytes.
+        /// Áp dụng: Fault Tolerance + Stream-oriented communication
+        /// RAM = 8KB dù file bao lớn.
+        /// </summary>
+        public static async Task<bool> WriteFileStreamAsync(
+            string filePath,
+            Func<Stream> getNetworkStream,  // Lấy NetworkStream để đọc dữ liệu
+            long fileSize,
+            out bool wasLocked,
+            Action<long, long>? onProgress = null)  // (bytesReceived, totalBytes)
+        {
+            wasLocked = false;
+            var lk = GetLock(filePath);
+
+            if (!lk.TryEnterWriteLock(0))
+            {
+                wasLocked = true;
+                return false;
+            }
+
+            try
+            {
+                // Tạo directory nếu chưa có
+                string? dir = Path.GetDirectoryName(filePath);
+                if (dir != null && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                long bytesReceived = 0;
+                const int BUFFER_SIZE = 8192;
+                byte[] buffer = new byte[BUFFER_SIZE];
+
+                using (var fs = File.Create(filePath))
+                using (var networkStream = getNetworkStream())
+                {
+                    while (bytesReceived < fileSize)
+                    {
+                        int toRead = (int)Math.Min(buffer.Length, fileSize - bytesReceived);
+                        int bytesRead = await networkStream.ReadAsync(buffer, 0, toRead);
+
+                        if (bytesRead == 0) break;
+
+                        fs.Write(buffer, 0, bytesRead);
+                        bytesReceived += bytesRead;
+                        onProgress?.Invoke(bytesReceived, fileSize);
+                    }
+                }
+
+                return bytesReceived == fileSize;
+            }
+            catch { return false; }
+            finally { lk.ExitWriteLock(); }
         }
     }
 }

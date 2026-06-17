@@ -208,15 +208,43 @@ namespace P2PFileSharingApp.Network
             string? fullPath = FileManager.GetSafePath(SharedFolderPath, relativePath);
             if (fullPath == null) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Đường dẫn không hợp lệ."); return; }
 
-            byte[]? data = FileManager.ReadFileSafe(fullPath);
-            if (data == null)
+            if (!File.Exists(fullPath))
             {
                 writer.WriteLine($"{ProtocolMessages.RES_ERROR}|File không tồn tại.");
                 return;
             }
-            writer.WriteLine($"{ProtocolMessages.RES_OK}|{data.Length}");
-            stream.Write(data, 0, data.Length);
-            stream.Flush();
+
+            var fi = new FileInfo(fullPath);
+            writer.WriteLine($"{ProtocolMessages.RES_OK}|{fi.Length}");
+
+            try
+            {
+                // Stream file in 8KB chunks (Fault Tolerance strategy)
+                using (var fs = File.OpenRead(fullPath))
+                {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    long totalSent = 0;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                    while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        stream.Write(buffer, 0, bytesRead);
+                        totalSent += bytesRead;
+
+                        // Log every 1MB with progress %
+                        if (totalSent % (1024 * 1024) == 0 || fs.Position == fs.Length)
+                        {
+                            int percent = (int)((totalSent * 100) / fi.Length);
+                            double mbps = (totalSent / (1024.0 * 1024.0)) / sw.Elapsed.TotalSeconds;
+                            Log($"📤 {relativePath} | {percent}% | {totalSent / (1024.0 * 1024.0):F1}MB / {fi.Length / (1024.0 * 1024.0):F1}MB | {mbps:F2}MB/s");
+                        }
+                    }
+                    stream.Flush();
+                    Log($"✅ Download hoàn tất: {relativePath} ({totalSent} bytes)");
+                }
+            }
+            catch (Exception ex) { Log($"❌ Lỗi download {relativePath}: {ex.Message}"); }
         }
 
         private void HandleUpload(string relativePath, string sizeStr, NetworkStream stream, StreamWriter writer)
@@ -224,29 +252,54 @@ namespace P2PFileSharingApp.Network
             string? fullPath = FileManager.GetSafePath(SharedFolderPath, relativePath);
             if (fullPath == null) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Đường dẫn không hợp lệ."); return; }
 
-            if (!int.TryParse(sizeStr, out int fileSize))
+            if (!long.TryParse(sizeStr, out long fileSize))
             {
                 writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Kích thước file không hợp lệ.");
                 return;
             }
             writer.WriteLine($"{ProtocolMessages.RES_OK}|READY");
 
-            byte[] buffer = new byte[fileSize];
-            int totalRead = 0;
-            while (totalRead < fileSize)
+            try
             {
-                int read = stream.Read(buffer, totalRead, fileSize - totalRead);
-                if (read == 0) break;
-                totalRead += read;
-            }
+                // Tạo directory nếu cần
+                string? dir = Path.GetDirectoryName(fullPath);
+                if (dir != null && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
 
-            bool ok = FileManager.WriteFileSafe(fullPath, buffer, out bool wasLocked);
-            if (wasLocked)
-                writer.WriteLine($"{ProtocolMessages.RES_LOCKED}|File đang được người khác sử dụng, vui lòng thử lại sau.");
-            else if (ok)
-                writer.WriteLine($"{ProtocolMessages.RES_OK}|Upload thành công.");
-            else
-                writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Không thể ghi file.");
+                // Ghi file theo dạng Stream
+                bool ok = await FileManager.WriteFileStreamAsync(
+                    fullPath,
+                    () => stream,
+                    fileSize,
+                    out bool wasLocked,
+                    (bytesReceived, total) =>
+                    {
+                        if (bytesReceived % (1024 * 1024) == 0 || bytesReceived == total)
+                        {
+                            int percent = (int)((bytesReceived * 100) / total);
+                            Log($"📥 {relativePath} | {percent}% | {bytesReceived / (1024.0 * 1024.0):F1}MB / {total / (1024.0 * 1024.0):F1}MB");
+                        }
+                    });
+
+                if (wasLocked)
+                {
+                    writer.WriteLine($"{ProtocolMessages.RES_LOCKED}|File đang được người khác sử dụng, vui lòng thử lại sau.");
+                }
+                else
+                {
+                    writer.WriteLine(ok
+                        ? $"{ProtocolMessages.RES_OK}|Upload thành công."
+                        : $"{ProtocolMessages.RES_ERROR}|Upload không hoàn tất.");
+                    Log(ok
+                        ? $"✅ Upload hoàn tất: {relativePath}"
+                        : $"⚠️ Upload lỗi: {relativePath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                writer.WriteLine($"{ProtocolMessages.RES_ERROR}|{ex.Message}");
+                Log($"❌ Lỗi upload {relativePath}: {ex.Message}");
+            }
         }
 
         private void HandleDelete(string relativePath, StreamWriter writer)
