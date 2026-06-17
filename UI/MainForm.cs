@@ -29,7 +29,7 @@ public partial class MainForm : Form
     private readonly LanClientDiscoveryService _discoveryService = new();
     private P2PClient? _client;
     private LanServerBroadcaster? _serverBroadcaster;
-    private readonly BindingList<string> sharedFolders = [];
+    private string P2PSharedRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "P2PSharedRoot");
     private readonly ToolTip toolTips = new();
     private readonly ImageList fileIcons = new();
 
@@ -84,19 +84,22 @@ public partial class MainForm : Form
     public MainForm()
     {
         InitializeComponent();
+        
+        if (!Directory.Exists(P2PSharedRoot))
+            Directory.CreateDirectory(P2PSharedRoot);
+        _server.SharedFolderPath = P2PSharedRoot;
+
         Font = new Font("Segoe UI", 9.25F);
         toolTips.ShowAlways = true;
         InitializeFileIcons();
-        sharedFolders.Add(localRoot);
         BuildUi();
         LoadPeers();
-        LoadSharedFolders();
         LoadLocalFiles();
         LoadServerFiles();
         
         LoadPermissionsDemo();
         UpdateActionState();
-        AddServerLog("Server đang dừng. Thêm thư mục chia sẻ rồi bấm Bật server.", LogType.Info);
+        AddServerLog("Server đang dừng. Bấm Bật server để bắt đầu.", LogType.Info);
         AddClientLog("Bật Chế độ demo để thử kết nối khi chưa có server thật.", LogType.Info);
 
         _discoveryService.ServersChanged += DiscoveryService_ServersChanged;
@@ -284,29 +287,6 @@ public partial class MainForm : Form
         return header;
     }
 
-    private void MainTabs_DrawItem(object? sender, DrawItemEventArgs e)
-    {
-        TabPage page = mainTabs.TabPages[e.Index];
-        bool selected = e.Index == mainTabs.SelectedIndex;
-        Rectangle bounds = e.Bounds;
-        bounds.Inflate(-4, -5);
-
-        using GraphicsPath path = RoundedRect(bounds, 12);
-        using SolidBrush fill = new(selected ? Accent : Color.Transparent);
-        using Pen border = new(selected ? Accent : Color.FromArgb(216, 222, 229));
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.FillPath(fill, path);
-        e.Graphics.DrawPath(border, path);
-
-        TextRenderer.DrawText(
-            e.Graphics,
-            page.Text,
-            new Font("Segoe UI Semibold", 9.5F),
-            bounds,
-            selected ? Color.White : Ink,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-    }
-
     private Control BuildServerPage()
     {
         TableLayoutPanel page = new()
@@ -327,14 +307,12 @@ public partial class MainForm : Form
         page.Controls.Add(statusPanel, 0, 0);
         page.SetColumnSpan(statusPanel, 3);
 
-        Control sharedPanel = BuildSharedFoldersPanel();
         Control filesPanel = BuildServerFilesPanel();
         Control permissionsPanel = BuildPermissionsPanel();
-        sharedPanel.Margin = new Padding(0, 0, 10, 12);
-        filesPanel.Margin = new Padding(6, 0, 10, 12);
+        filesPanel.Margin = new Padding(0, 0, 10, 12);
         permissionsPanel.Margin = new Padding(6, 0, 0, 12);
-        page.Controls.Add(sharedPanel, 0, 1);
-        page.Controls.Add(filesPanel, 1, 1);
+        page.Controls.Add(filesPanel, 0, 1);
+        page.SetColumnSpan(filesPanel, 2);
         page.Controls.Add(permissionsPanel, 2, 1);
 
         Control logPanel = BuildServerLogPanel();
@@ -349,10 +327,10 @@ public partial class MainForm : Form
         TableLayoutPanel panel = CreatePanel(5, 2);
         panel.Padding = new Padding(14, 12, 14, 12);
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
 
@@ -371,57 +349,28 @@ public partial class MainForm : Form
         Label summary = new()
         {
             Dock = DockStyle.Fill,
-            Text = "Chia sẻ nhiều thư mục cùng lúc. Mỗi IP có thể được cấp quyền tải lên, tải về hoặc cả hai.",
+            Text = $"Tất cả file trong thư mục Root sẽ được chia sẻ.\n{P2PSharedRoot}",
             AutoEllipsis = true,
             ForeColor = Muted,
             TextAlign = ContentAlignment.MiddleLeft
         };
         panel.Controls.Add(summary, 0, 1);
 
-        btnAddSharedFolder = PrimaryButton("Thêm thư mục");
-        btnAddSharedFolder.Click += (_, _) => AddSharedFolder();
-        panel.Controls.Add(btnAddSharedFolder, 1, 1);
+        Button btnOpenRoot = SecondaryButton("Mở thư mục");
+        btnOpenRoot.Click += (_, _) => OpenRootFolder();
+        panel.Controls.Add(btnOpenRoot, 1, 1);
 
-        btnRemoveSharedFolder = SecondaryButton("Gỡ thư mục");
-        btnRemoveSharedFolder.Click += (_, _) => RemoveSelectedSharedFolder();
-        panel.Controls.Add(btnRemoveSharedFolder, 2, 1);
+        Button btnAddFile = PrimaryButton("Thêm File");
+        btnAddFile.Click += (_, _) => AddFileToRoot();
+        panel.Controls.Add(btnAddFile, 2, 1);
 
-        btnRefreshServerFiles = SecondaryButton("Làm mới");
-        btnRefreshServerFiles.Click += (_, _) => LoadServerFiles();
-        panel.Controls.Add(btnRefreshServerFiles, 3, 1);
+        Button btnAddFolder = PrimaryButton("Thêm Thư mục");
+        btnAddFolder.Click += (_, _) => AddFolderToRoot();
+        panel.Controls.Add(btnAddFolder, 3, 1);
 
         btnToggleServer = PrimaryButton("Bật server");
         btnToggleServer.Click += (_, _) => ToggleServer();
         panel.Controls.Add(btnToggleServer, 4, 1);
-
-        return panel;
-    }
-
-    private Control BuildSharedFoldersPanel()
-    {
-        TableLayoutPanel panel = CreatePanel(1, 2);
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-        panel.Controls.Add(SectionTitle("Thư mục chia sẻ"), 0, 0);
-        lvSharedFolders = new ListView
-        {
-            Dock = DockStyle.Fill,
-            View = View.Details,
-            FullRowSelect = true,
-            GridLines = false,
-            BorderStyle = BorderStyle.None,
-            BackColor = PanelBack,
-            ForeColor = Ink,
-            ShowItemToolTips = true,
-            Scrollable = true
-        };
-        ApplyListViewChrome(lvSharedFolders);
-        lvSharedFolders.Columns.Add("Tên thư mục", 150);
-        lvSharedFolders.Columns.Add("Đường dẫn", 260);
-        lvSharedFolders.Resize += (_, _) => FitSharedFolderColumns();
-        lvSharedFolders.HandleCreated += (_, _) => FitSharedFolderColumns();
-        panel.Controls.Add(lvSharedFolders, 0, 1);
 
         return panel;
     }
@@ -567,7 +516,7 @@ public partial class MainForm : Form
         panel.Controls.Add(FieldLabel("IP"), 2, 1);
         panel.Controls.Add(FieldLabel("Port"), 3, 1);
         panel.Controls.Add(FieldLabel("Thao tác"), 4, 1);
-        panel.Controls.Add(FieldLabel("Tùy chọn"), 5, 1);
+        panel.Controls.Add(FieldLabel("Tìm kiếm"), 5, 1);
         panel.Controls.Add(FieldLabel("Kết nối"), 6, 1);
         panel.Controls.Add(FieldLabel("Trạng thái"), 7, 1);
 
@@ -594,6 +543,19 @@ public partial class MainForm : Form
         btnSavePeer = SecondaryButton("Lưu IP");
         btnSavePeer.Click += (_, _) => SavePeerFromInputs();
         panel.Controls.Add(btnSavePeer, 4, 2);
+
+        Button btnScanLAN = SecondaryButton("Quét LAN");
+        btnScanLAN.Click += async (_, _) => 
+        {
+            btnScanLAN.Enabled = false;
+            btnScanLAN.Text = "Đang quét...";
+            await _discoveryService.StopAsync();
+            _discoveryService.Start();
+            await Task.Delay(2000);
+            btnScanLAN.Text = "Quét LAN";
+            btnScanLAN.Enabled = true;
+        };
+        panel.Controls.Add(btnScanLAN, 5, 2);
 
         chkDemoMode = new CheckBox
         {
@@ -1172,58 +1134,64 @@ public partial class MainForm : Form
         return bitmap;
     }
 
-    private void LoadSharedFolders()
+    private void OpenRootFolder()
     {
-        lvSharedFolders.Items.Clear();
+        if (Directory.Exists(P2PSharedRoot))
+            System.Diagnostics.Process.Start("explorer.exe", P2PSharedRoot);
+    }
 
-        foreach (string folder in sharedFolders.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
+    private void AddFileToRoot()
+    {
+        using OpenFileDialog dialog = new() { Multiselect = true };
+        if (dialog.ShowDialog(this) == DialogResult.OK)
         {
-            DirectoryInfo info = new(folder);
-            ListViewItem item = new(info.Name);
-            item.SubItems.Add(ShortenPath(info.FullName, 42));
-            item.Tag = info.FullName;
-            item.ToolTipText = info.FullName;
-            lvSharedFolders.Items.Add(item);
+            foreach (string file in dialog.FileNames)
+            {
+                string dest = Path.Combine(P2PSharedRoot, Path.GetFileName(file));
+                try
+                {
+                    File.Copy(file, dest, true);
+                }
+                catch (Exception ex)
+                {
+                    AddServerLog($"Lỗi copy file: {ex.Message}", LogType.Error);
+                }
+            }
+            AddServerLog($"Đã thêm {dialog.FileNames.Length} file vào Root.", LogType.Success);
+            LoadServerFiles();
         }
     }
 
-    private void AddSharedFolder()
+    private void AddFolderToRoot()
     {
-        using FolderBrowserDialog dialog = new() { SelectedPath = localRoot };
-        if (dialog.ShowDialog(this) != DialogResult.OK)
-            return;
-
-        if (sharedFolders.Any(path => string.Equals(path, dialog.SelectedPath, StringComparison.OrdinalIgnoreCase)))
+        using FolderBrowserDialog dialog = new();
+        if (dialog.ShowDialog(this) == DialogResult.OK)
         {
-            AddServerLog("Thư mục này đã nằm trong danh sách chia sẻ.", LogType.Info);
-            return;
+            string sourcePath = dialog.SelectedPath;
+            string destPath = Path.Combine(P2PSharedRoot, new DirectoryInfo(sourcePath).Name);
+            
+            try
+            {
+                CopyDirectory(sourcePath, destPath);
+                AddServerLog($"Đã copy thư mục vào Root.", LogType.Success);
+                LoadServerFiles();
+            }
+            catch (Exception ex)
+            {
+                AddServerLog($"Lỗi copy thư mục: {ex.Message}", LogType.Error);
+            }
         }
-
-        sharedFolders.Add(dialog.SelectedPath);
-        LoadSharedFolders();
-        LoadServerFiles();
-        AddServerLog("Đã thêm thư mục chia sẻ: " + dialog.SelectedPath, LogType.Success);
     }
 
-    private void RemoveSelectedSharedFolder()
+    private void CopyDirectory(string sourceDir, string destinationDir)
     {
-        if (lvSharedFolders.SelectedItems.Count == 0)
-        {
-            AddServerLog("Hãy chọn thư mục cần gỡ khỏi danh sách chia sẻ.", LogType.Error);
-            return;
-        }
+        Directory.CreateDirectory(destinationDir);
 
-        foreach (ListViewItem item in lvSharedFolders.SelectedItems.Cast<ListViewItem>().ToList())
-        {
-            string path = item.Tag?.ToString() ?? "";
-            string? existing = sharedFolders.FirstOrDefault(folder => string.Equals(folder, path, StringComparison.OrdinalIgnoreCase));
-            if (existing != null)
-                sharedFolders.Remove(existing);
-        }
+        foreach (var file in Directory.GetFiles(sourceDir))
+            File.Copy(file, Path.Combine(destinationDir, Path.GetFileName(file)), true);
 
-        LoadSharedFolders();
-        LoadServerFiles();
-        AddServerLog("Đã cập nhật danh sách thư mục chia sẻ.", LogType.Success);
+        foreach (var directory in Directory.GetDirectories(sourceDir))
+            CopyDirectory(directory, Path.Combine(destinationDir, Path.GetFileName(directory)));
     }
 
     private void ChooseLocalFolder()
@@ -1333,12 +1301,7 @@ public partial class MainForm : Form
     private void LoadPeers()
     {
         peers.Clear();
-        foreach (PeerInfo peer in new List<PeerInfo>())
-            peers.Add(peer);
-
         cboPeers.DataSource = peers;
-        if (peers.Count > 0)
-            cboPeers.SelectedIndex = 0;
     }
 
     private void FillSelectedPeer()
@@ -1374,7 +1337,7 @@ public partial class MainForm : Form
         if (existing == null)
         {
             peers.Add(input);
-            cboPeers.SelectedItem = input;
+            cboPeers.Refresh();
         }
         else
         {
@@ -1424,6 +1387,7 @@ public partial class MainForm : Form
         if (existing == null)
         {
             peers.Add(discoveredPeer);
+            cboPeers.Refresh();
             AddClientLog($"Phát hiện peer mới: {discoveredPeer}.", LogType.Info);
             return;
         }
@@ -1438,7 +1402,7 @@ public partial class MainForm : Form
         if (!TryReadPeerInputs(out PeerInfo? peer) || peer == null)
             return;
 
-        btnConnect.Enabled = false;
+        if (chkDemoMode != null) chkDemoMode.Enabled = false;
         btnConnect.Text = "Đang kết nối...";
         progressConnect.Visible = true;
         progressConnect.Style = ProgressBarStyle.Marquee;
@@ -1494,7 +1458,7 @@ public partial class MainForm : Form
             progressConnect.Style = ProgressBarStyle.Blocks;
             progressConnect.Visible = false;
             btnConnect.Text = "Kết nối";
-            btnConnect.Enabled = true;
+            if (chkDemoMode != null) chkDemoMode.Enabled = true;
             UpdateActionState();
         }
     }
@@ -1505,7 +1469,7 @@ public partial class MainForm : Form
             return;
 
         lvLocalFiles.Items.Clear();
-        AddDirectoryItems(lvLocalFiles);
+        AddDirectoryItems(lvLocalFiles, localRoot);
     }
 
     private void LoadServerFiles()
@@ -1515,33 +1479,21 @@ public partial class MainForm : Form
 
         lvServerFiles.Items.Clear();
 
-        foreach (string folder in sharedFolders.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
-            AddSharedDirectoryItems(lvServerFiles, folder);
+        if (Directory.Exists(P2PSharedRoot))
+            AddDirectoryItems(lvServerFiles, P2PSharedRoot);
     }
 
-    private void AddDirectoryItems(ListView target)
+    private void AddDirectoryItems(ListView target, string rootPath)
     {
-        if (!Directory.Exists(localRoot))
+        if (!Directory.Exists(rootPath))
             return;
 
-        DirectoryInfo root = new(localRoot);
+        DirectoryInfo root = new(rootPath);
         foreach (DirectoryInfo directory in root.GetDirectories())
             target.Items.Add(CreateFileItem(directory.Name, "Thư mục", "", directory.LastWriteTime, directory.FullName));
 
         foreach (FileInfo file in root.GetFiles())
             target.Items.Add(CreateFileItem(file.Name, "Tệp", FormatBytes(file.Length), file.LastWriteTime, file.FullName));
-    }
-
-    private void AddSharedDirectoryItems(ListView target, string sharedFolder)
-    {
-        DirectoryInfo root = new(sharedFolder);
-        string prefix = root.Name;
-
-        foreach (DirectoryInfo directory in root.GetDirectories())
-            target.Items.Add(CreateFileItem($"{prefix}\\{directory.Name}", "Thư mục", "", directory.LastWriteTime, directory.FullName));
-
-        foreach (FileInfo file in root.GetFiles())
-            target.Items.Add(CreateFileItem($"{prefix}\\{file.Name}", "Tệp", FormatBytes(file.Length), file.LastWriteTime, file.FullName));
     }
 
     private async Task LoadRemoteFilesAsync()
@@ -1609,7 +1561,7 @@ public partial class MainForm : Form
 
     private async Task UploadFilesAsync(IEnumerable<string> filePaths)
     {
-        if (!isConnected && !chkDemoMode.Checked)
+        if (!isConnected)
         {
             AddClientLog("Chưa kết nối tới server khác.", LogType.Error);
             return;
@@ -1900,23 +1852,6 @@ public partial class MainForm : Form
             "GB" => (long)(value * 1024 * 1024 * 1024),
             _ => (long)value
         };
-    }
-
-    private static string ShortenPath(string path, int maxLength)
-    {
-        if (path.Length <= maxLength)
-            return path;
-
-        string root = Path.GetPathRoot(path) ?? "";
-        string name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        string prefix = string.IsNullOrWhiteSpace(root) ? "" : root.TrimEnd(Path.DirectorySeparatorChar);
-
-        string compact = $"{prefix}\\...\\{name}";
-        if (compact.Length <= maxLength)
-            return compact;
-
-        int keep = Math.Max(8, maxLength - 4);
-        return path[..keep] + "...";
     }
 
     private static string SanitizeFileName(string fileName)
