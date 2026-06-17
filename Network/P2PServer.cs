@@ -111,6 +111,9 @@ namespace P2PFileSharingApp.Network
                 using var reader = new StreamReader(stream, Encoding.UTF8);
                 using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
 
+                // Gửi ngay mức quyền cho Client khi vừa kết nối
+                writer.WriteLine($"{ProtocolMessages.RES_OK}|{PermissionManager.GetPermission(clientIP)}");
+
                 while (client.Connected && _isRunning)
                 {
                     string? line = reader.ReadLine();
@@ -139,7 +142,7 @@ namespace P2PFileSharingApp.Network
             var parts = message.Split(new char[] { ProtocolMessages.SEPARATOR }, 3);
             string cmd = parts[0];
 
-            // ── Kiểm tra quyền đọc trước tiên ──
+            // ── Kiểm tra quyền đọc trước tiên (Chặn hiển thị / xem file nếu bị Denied) ──
             if (!PermissionManager.CanRead(clientIP))
             {
                 writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Bạn bị chặn khỏi server này.");
@@ -159,6 +162,8 @@ namespace P2PFileSharingApp.Network
 
                 // ── DOWNLOAD ──
                 case ProtocolMessages.REQ_DOWNLOAD:
+                    if (!PermissionManager.CanDownload(clientIP))
+                    { writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Bạn không có quyền tải file."); break; }
                     if (parts.Length < 2) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Thiếu tên file."); break; }
                     HandleDownload(parts[1], stream, writer);
                     break;
@@ -171,26 +176,26 @@ namespace P2PFileSharingApp.Network
                     HandleUpload(parts[1], parts[2], stream, writer);
                     break;
 
-                // ── DELETE (yêu cầu Write) ──
+                // ── DELETE (yêu cầu DeleteOrEdit) ──
                 case ProtocolMessages.REQ_DELETE:
-                    if (!PermissionManager.CanWrite(clientIP))
-                    { writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Bạn chỉ có quyền Read-Only."); break; }
+                    if (!PermissionManager.CanDeleteOrEdit(clientIP))
+                    { writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Bạn không có quyền xóa file."); break; }
                     if (parts.Length < 2) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Thiếu tên file."); break; }
                     HandleDelete(parts[1], writer);
                     break;
 
-                // ── RENAME (yêu cầu Write) ──
+                // ── RENAME (yêu cầu DeleteOrEdit) ──
                 case ProtocolMessages.REQ_RENAME:
-                    if (!PermissionManager.CanWrite(clientIP))
-                    { writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Bạn chỉ có quyền Read-Only."); break; }
+                    if (!PermissionManager.CanDeleteOrEdit(clientIP))
+                    { writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Bạn không có quyền sửa file."); break; }
                     if (parts.Length < 3) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Thiếu tham số."); break; }
                     HandleRename(parts[1], parts[2], writer);
                     break;
 
-                // ── MKDIR (yêu cầu Write) ──
+                // ── MKDIR (yêu cầu DeleteOrEdit) ──
                 case ProtocolMessages.REQ_MKDIR:
-                    if (!PermissionManager.CanWrite(clientIP))
-                    { writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Bạn chỉ có quyền Read-Only."); break; }
+                    if (!PermissionManager.CanDeleteOrEdit(clientIP))
+                    { writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Bạn không có quyền tạo thư mục."); break; }
                     if (parts.Length < 2) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Thiếu tên thư mục."); break; }
                     HandleMkdir(parts[1], writer);
                     break;

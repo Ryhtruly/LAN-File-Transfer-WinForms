@@ -36,6 +36,10 @@ public partial class MainForm : Form
     private CancellationTokenSource? connectCts;
     private CancellationTokenSource? transferCts;
     private string localRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "P2PDownloads");
+    
+    // Lưu mức quyền hiện tại do Server trả về khi kết nối
+    private string remotePermission = "ReadOnly";
+
     private bool isConnected;
     private bool serverRunning;
 
@@ -439,7 +443,7 @@ public partial class MainForm : Form
         editor.Controls.Add(txtPermissionName, 1, 0);
 
         cboPermissionMode = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
-        cboPermissionMode.Items.AddRange(["Chỉ tải về", "Chỉ tải lên", "Tải lên và tải về"]);
+        cboPermissionMode.Items.AddRange(["Chỉ tải về", "Chỉ tải lên", "Tải lên và tải về", "Toàn quyền"]);
         cboPermissionMode.SelectedIndex = 2;
         editor.Controls.Add(cboPermissionMode, 0, 1);
         editor.SetColumnSpan(cboPermissionMode, 2);
@@ -600,9 +604,9 @@ public partial class MainForm : Form
         TableLayoutPanel panel = CreatePanel(3, 2);
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+        panel.ColumnStyles.Add(new RowStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 110));
+        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 120));
 
         panel.Controls.Add(SectionTitle("Thư mục để tải về"), 0, 0);
         
@@ -627,11 +631,11 @@ public partial class MainForm : Form
         TableLayoutPanel panel = CreatePanel(5, 2);
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
+        panel.ColumnStyles.Add(new RowStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 47));
+        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 47));
+        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 47));
+        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 47));
 
         panel.Controls.Add(SectionTitle("Dữ liệu trên server đang kết nối"), 0, 0);
 
@@ -1255,9 +1259,19 @@ public partial class MainForm : Form
         ListViewItem item = new(ip);
         item.SubItems.Add(permission);
         item.SubItems.Add(name);
-        item.ForeColor = permission.Contains("tải lên", StringComparison.OrdinalIgnoreCase) ? Success : Ink;
+        item.ForeColor = permission.Contains("tải lên", StringComparison.OrdinalIgnoreCase) || permission.Contains("Toàn quyền", StringComparison.OrdinalIgnoreCase) ? Success : Ink;
         item.ToolTipText = $"{ip} - {permission} - {name}";
         lvPermissions.Items.Add(item);
+
+        P2PFileSharingApp.Core.PermissionLevel level = permission switch
+        {
+            "Chỉ tải về" => P2PFileSharingApp.Core.PermissionLevel.ReadOnly,
+            "Chỉ tải lên" => P2PFileSharingApp.Core.PermissionLevel.UploadOnly,
+            "Tải lên và tải về" => P2PFileSharingApp.Core.PermissionLevel.ReadWrite,
+            "Toàn quyền" => P2PFileSharingApp.Core.PermissionLevel.FullAccess,
+            _ => P2PFileSharingApp.Core.PermissionLevel.ReadOnly
+        };
+        P2PFileSharingApp.Core.PermissionManager.SetPermission(ip, level);
     }
 
     private void AddOrUpdatePermission()
@@ -1273,10 +1287,7 @@ public partial class MainForm : Form
             return;
         }
 
-        ListViewItem? existing = lvPermissions.Items
-            .Cast<ListViewItem>()
-            .FirstOrDefault(item => string.Equals(item.Text, ip, StringComparison.OrdinalIgnoreCase));
-
+        var existing = lvPermissions.Items.Cast<ListViewItem>().FirstOrDefault(i => i.Text == ip);
         if (existing == null)
         {
             AddPermission(ip, permission, string.IsNullOrWhiteSpace(name) ? ip : name);
@@ -1286,8 +1297,19 @@ public partial class MainForm : Form
 
         existing.SubItems[1].Text = permission;
         existing.SubItems[2].Text = string.IsNullOrWhiteSpace(name) ? existing.SubItems[2].Text : name;
-        existing.ForeColor = permission.Contains("tải lên", StringComparison.OrdinalIgnoreCase) ? Success : Ink;
+        existing.ForeColor = permission.Contains("tải lên", StringComparison.OrdinalIgnoreCase) || permission.Contains("Toàn quyền", StringComparison.OrdinalIgnoreCase) ? Success : Ink;
         existing.ToolTipText = $"{ip} - {permission} - {existing.SubItems[2].Text}";
+        
+        P2PFileSharingApp.Core.PermissionLevel level = permission switch
+        {
+            "Chỉ tải về" => P2PFileSharingApp.Core.PermissionLevel.ReadOnly,
+            "Chỉ tải lên" => P2PFileSharingApp.Core.PermissionLevel.UploadOnly,
+            "Tải lên và tải về" => P2PFileSharingApp.Core.PermissionLevel.ReadWrite,
+            "Toàn quyền" => P2PFileSharingApp.Core.PermissionLevel.FullAccess,
+            _ => P2PFileSharingApp.Core.PermissionLevel.ReadOnly
+        };
+        P2PFileSharingApp.Core.PermissionManager.SetPermission(ip, level);
+        
         AddServerLog($"Đã cập nhật quyền '{permission}' cho {ip}.", LogType.Success);
     }
 
@@ -1414,11 +1436,13 @@ public partial class MainForm : Form
             if (!res.ok) throw new Exception(res.message);
 
             isConnected = true;
-            lblConnection.Text = "Đã kết nối";
+            remotePermission = res.permission;
+            lblConnection.Text = $"Đã kết nối ({remotePermission})";
             lblConnection.ForeColor = Success;
             lblConnection.BackColor = SuccessSoft;
-            AddClientLog($"Kết nối thành công tới {peer}.", LogType.Success);
-            SavePeerFromInputs();
+            AddClientLog($"Đã kết nối thành công tới {peer.IpAddress}:{peer.Port}", LogType.Success);
+
+            btnConnect.Text = "Ngắt kết nối";
             await LoadRemoteFilesAsync();
         }
         catch (OperationCanceledException)
@@ -1432,6 +1456,7 @@ public partial class MainForm : Form
         catch (Exception ex)
         {
             isConnected = false;
+            remotePermission = "ReadOnly";
             lblConnection.Text = "Kết nối thất bại";
             lblConnection.ForeColor = Danger;
             lblConnection.BackColor = DangerSoft;
@@ -1443,7 +1468,7 @@ public partial class MainForm : Form
             connectCts = null;
             progressConnect.Style = ProgressBarStyle.Blocks;
             progressConnect.Visible = false;
-            btnConnect.Text = "Kết nối";
+            if(!isConnected) btnConnect.Text = "Kết nối";
             
             UpdateActionState();
         }
@@ -1698,10 +1723,7 @@ public partial class MainForm : Form
 
     private void SetTransferRunning(bool running)
     {
-        btnUpload.Enabled = !running;
-        btnDownload.Enabled = !running;
-        btnDelete.Enabled = !running;
-        btnChooseFolder.Enabled = !running;
+        UpdateActionState();
         btnCancelTransfer.Enabled = true;
 
         if (!running)
@@ -1709,17 +1731,20 @@ public partial class MainForm : Form
             progressTransfer.Value = 0;
             lblTransfer.ForeColor = Success;
             lblTransfer.Text = "✓ Sẵn sàng truyền file - 0%";
-            UpdateActionState();
         }
     }
 
     private void UpdateActionState()
     {
-        bool allowRemoteActions = isConnected;
-        btnUpload.Enabled = allowRemoteActions;
-        btnDownload.Enabled = allowRemoteActions;
-        btnDelete.Enabled = allowRemoteActions;
-        btnCancelTransfer.Enabled = true;
+        bool hasSelection = lvRemoteFiles.SelectedItems.Count > 0;
+        
+        bool canUpload = remotePermission == "UploadOnly" || remotePermission == "ReadWrite" || remotePermission == "FullAccess";
+        bool canDownload = remotePermission == "ReadOnly" || remotePermission == "ReadWrite" || remotePermission == "FullAccess";
+        bool canEdit = remotePermission == "FullAccess";
+
+        btnUpload.Enabled = isConnected && canUpload;
+        btnDownload.Enabled = isConnected && hasSelection && canDownload;
+        btnDelete.Enabled = isConnected && hasSelection && canEdit;
     }
 
     private void lvRemoteFiles_DragEnter(object? sender, DragEventArgs e)

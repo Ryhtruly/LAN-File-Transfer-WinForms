@@ -12,7 +12,9 @@ namespace P2PFileSharingApp.Core
     {
         Denied,
         ReadOnly,
-        ReadWrite
+        UploadOnly,
+        ReadWrite,
+        FullAccess
     }
 
     public static class PermissionManager
@@ -33,11 +35,27 @@ namespace P2PFileSharingApp.Core
             _permissions[ip] = level;
         }
 
-        /// <summary>Kiểm tra nhanh IP có đủ quyền thực hiện lệnh yêu cầu ghi không.</summary>
+        /// <summary>Kiểm tra IP có quyền Upload không (UploadOnly, ReadWrite, FullAccess).</summary>
         public static bool CanWrite(string ip)
-            => GetPermission(ip) == PermissionLevel.ReadWrite;
+        {
+            var level = GetPermission(ip);
+            return level == PermissionLevel.UploadOnly || level == PermissionLevel.ReadWrite || level == PermissionLevel.FullAccess;
+        }
 
-        /// <summary>Kiểm tra nhanh IP có đủ quyền đọc không (ReadOnly hoặc ReadWrite).</summary>
+        /// <summary>Kiểm tra IP có quyền xóa, sửa, tạo thư mục không (FullAccess).</summary>
+        public static bool CanDeleteOrEdit(string ip)
+        {
+            return GetPermission(ip) == PermissionLevel.FullAccess;
+        }
+
+        /// <summary>Kiểm tra IP có quyền tải về không (ReadOnly, ReadWrite, FullAccess). UploadOnly KHÔNG ĐƯỢC tải về.</summary>
+        public static bool CanDownload(string ip)
+        {
+            var level = GetPermission(ip);
+            return level == PermissionLevel.ReadOnly || level == PermissionLevel.ReadWrite || level == PermissionLevel.FullAccess;
+        }
+
+        /// <summary>Kiểm tra IP có quyền xem danh sách file không. Bị chặn (Denied) thì không được xem.</summary>
         public static bool CanRead(string ip)
             => GetPermission(ip) != PermissionLevel.Denied;
 
