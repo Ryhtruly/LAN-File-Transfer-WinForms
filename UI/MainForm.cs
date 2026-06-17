@@ -35,7 +35,7 @@ public partial class MainForm : Form
 
     private CancellationTokenSource? connectCts;
     private CancellationTokenSource? transferCts;
-    private string localRoot = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    private string localRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "P2PDownloads");
     private bool isConnected;
     private bool serverRunning;
 
@@ -54,7 +54,7 @@ public partial class MainForm : Form
     private ListView lvServerFiles = null!;
     private ListView lvPermissions = null!;
     private ListView lvServerLogs = null!;
-    private TextBox txtPermissionIp = null!;
+    private ComboBox cboPermissionIp = null!;
     private TextBox txtPermissionName = null!;
     private ComboBox cboPermissionMode = null!;
     private Button btnAddPermission = null!;
@@ -87,6 +87,9 @@ public partial class MainForm : Form
         
         if (!Directory.Exists(P2PSharedRoot))
             Directory.CreateDirectory(P2PSharedRoot);
+        if (!Directory.Exists(localRoot))
+            Directory.CreateDirectory(localRoot);
+
         _server.SharedFolderPath = P2PSharedRoot;
 
         Font = new Font("Segoe UI", 9.25F);
@@ -327,16 +330,16 @@ public partial class MainForm : Form
         TableLayoutPanel panel = CreatePanel(5, 2);
         panel.Padding = new Padding(14, 12, 14, 12);
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
 
         Label title = SectionTitle("Server của máy mình");
         panel.Controls.Add(title, 0, 0);
-        panel.SetColumnSpan(title, 4);
+        panel.SetColumnSpan(title, 5);
 
         lblServerState = new ServerStatusIndicator
         {
@@ -423,22 +426,20 @@ public partial class MainForm : Form
 
     private Control BuildPermissionEditor()
     {
-        TableLayoutPanel editor = new()
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 4,
-            BackColor = PanelBack
-        };
+        TableLayoutPanel editor = CreatePanel(1, 4);
         editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        editor.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        editor.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        editor.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        editor.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        editor.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        editor.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        editor.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        editor.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
 
-        txtPermissionIp = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "IP máy khách" };
-        editor.Controls.Add(txtPermissionIp, 0, 0);
+        cboPermissionIp = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDown };
+        cboPermissionIp.DropDown += (_, _) => {
+            cboPermissionIp.Items.Clear();
+            foreach(var peer in peers) cboPermissionIp.Items.Add(peer.Key);
+        };
+        editor.Controls.Add(cboPermissionIp, 0, 0);
         txtPermissionName = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "Tên hiển thị" };
         editor.Controls.Add(txtPermissionName, 1, 0);
 
@@ -1269,14 +1270,14 @@ public partial class MainForm : Form
 
     private void AddOrUpdatePermission()
     {
-        string ip = txtPermissionIp.Text.Trim();
+        string ip = cboPermissionIp.Text.Trim();
         string name = txtPermissionName.Text.Trim();
         string permission = cboPermissionMode.SelectedItem?.ToString() ?? "Tải lên và tải về";
 
         if (string.IsNullOrWhiteSpace(ip))
         {
             AddServerLog("IP phân quyền không được để trống.", LogType.Error);
-            txtPermissionIp.Focus();
+            cboPermissionIp.Focus();
             return;
         }
 
