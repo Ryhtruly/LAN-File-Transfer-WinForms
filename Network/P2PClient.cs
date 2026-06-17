@@ -76,7 +76,7 @@ namespace P2PFileSharingApp.Network
         public async Task<string> GetListAsync(string path = "")
             => await SendLineAsync($"{ProtocolMessages.REQ_LIST}{ProtocolMessages.SEPARATOR}{path}");
 
-        public async Task<(bool ok, string msg)> DownloadAsync(string remotePath, string saveFolder)
+        public async Task<(bool ok, string msg)> DownloadAsync(string remotePath, string saveFolder, IProgress<P2PFileSharingApp.Models.TransferProgress>? progress = null, System.Threading.CancellationToken ct = default)
         {
             try
             {
@@ -117,6 +117,7 @@ namespace P2PFileSharingApp.Network
                             int percent = (int)((totalReceived * 100) / fileSize);
                             double mbps = (totalReceived / (1024.0 * 1024.0)) / stopwatch.Elapsed.TotalSeconds;
                             Log($"⬇ {remotePath} | {percent}% | {totalReceived / (1024.0 * 1024.0):F1}MB / {fileSize / (1024.0 * 1024.0):F1}MB | {mbps:F2}MB/s");
+                            progress?.Report(new P2PFileSharingApp.Models.TransferProgress(totalReceived, fileSize, mbps, Path.GetFileName(remotePath)));
                         }
                     }
                 }
@@ -127,7 +128,7 @@ namespace P2PFileSharingApp.Network
             catch (Exception ex) { return (false, ex.Message); }
         }
 
-        public async Task<(bool ok, string msg)> UploadAsync(string localFilePath, string remoteDir)
+        public async Task<(bool ok, string msg)> UploadAsync(string localFilePath, string remoteDir, IProgress<P2PFileSharingApp.Models.TransferProgress>? progress = null, System.Threading.CancellationToken ct = default)
         {
             try
             {
@@ -162,6 +163,7 @@ namespace P2PFileSharingApp.Network
                             int percent = (int)((totalSent * 100) / fi.Length);
                             double mbps = (totalSent / (1024.0 * 1024.0)) / stopwatch.Elapsed.TotalSeconds;
                             Log($"⬆ {fileName} | {percent}% | {totalSent / (1024.0 * 1024.0):F1}MB / {fi.Length / (1024.0 * 1024.0):F1}MB | {mbps:F2}MB/s");
+                            progress?.Report(new P2PFileSharingApp.Models.TransferProgress(totalSent, fi.Length, mbps, fileName));
                         }
                     }
                 }

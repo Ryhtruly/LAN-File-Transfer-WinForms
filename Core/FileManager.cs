@@ -302,20 +302,17 @@ namespace P2PFileSharingApp.Core
         /// Áp dụng: Fault Tolerance + Stream-oriented communication
         /// RAM = 8KB dù file bao lớn.
         /// </summary>
-        public static async Task<bool> WriteFileStreamAsync(
+        public static async Task<(bool Ok, bool WasLocked)> WriteFileStreamAsync(
             string filePath,
             Func<Stream> getNetworkStream,  // Lấy NetworkStream để đọc dữ liệu
             long fileSize,
-            out bool wasLocked,
             Action<long, long>? onProgress = null)  // (bytesReceived, totalBytes)
         {
-            wasLocked = false;
             var lk = GetLock(filePath);
 
             if (!lk.TryEnterWriteLock(0))
             {
-                wasLocked = true;
-                return false;
+                return (false, true);
             }
 
             try
@@ -345,9 +342,9 @@ namespace P2PFileSharingApp.Core
                     }
                 }
 
-                return bytesReceived == fileSize;
+                return (bytesReceived == fileSize, false);
             }
-            catch { return false; }
+            catch { return (false, false); }
             finally { lk.ExitWriteLock(); }
         }
     }

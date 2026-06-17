@@ -1,4 +1,4 @@
-namespace P2PFileSharingHaiUI.Models;
+namespace P2PFileSharingApp.Models;
 
 public sealed record TransferProgress(
     long BytesDone,

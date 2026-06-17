@@ -267,11 +267,10 @@ namespace P2PFileSharingApp.Network
                     Directory.CreateDirectory(dir);
 
                 // Ghi file theo dạng Stream
-                bool ok = await FileManager.WriteFileStreamAsync(
+                var result = FileManager.WriteFileStreamAsync(
                     fullPath,
                     () => stream,
                     fileSize,
-                    out bool wasLocked,
                     (bytesReceived, total) =>
                     {
                         if (bytesReceived % (1024 * 1024) == 0 || bytesReceived == total)
@@ -279,18 +278,18 @@ namespace P2PFileSharingApp.Network
                             int percent = (int)((bytesReceived * 100) / total);
                             Log($"📥 {relativePath} | {percent}% | {bytesReceived / (1024.0 * 1024.0):F1}MB / {total / (1024.0 * 1024.0):F1}MB");
                         }
-                    });
+                    }).GetAwaiter().GetResult();
 
-                if (wasLocked)
+                if (result.WasLocked)
                 {
                     writer.WriteLine($"{ProtocolMessages.RES_LOCKED}|File đang được người khác sử dụng, vui lòng thử lại sau.");
                 }
                 else
                 {
-                    writer.WriteLine(ok
+                    writer.WriteLine(result.Ok
                         ? $"{ProtocolMessages.RES_OK}|Upload thành công."
                         : $"{ProtocolMessages.RES_ERROR}|Upload không hoàn tất.");
-                    Log(ok
+                    Log(result.Ok
                         ? $"✅ Upload hoàn tất: {relativePath}"
                         : $"⚠️ Upload lỗi: {relativePath}");
                 }
