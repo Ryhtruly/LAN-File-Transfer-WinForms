@@ -604,9 +604,9 @@ public partial class MainForm : Form
         TableLayoutPanel panel = CreatePanel(3, 2);
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 110));
-        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 120));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
 
         panel.Controls.Add(SectionTitle("Thư mục để tải về"), 0, 0);
         
@@ -631,11 +631,11 @@ public partial class MainForm : Form
         TableLayoutPanel panel = CreatePanel(5, 2);
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 47));
-        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 47));
-        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 47));
-        panel.ColumnStyles.Add(new RowStyle(SizeType.Absolute, 47));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
 
         panel.Controls.Add(SectionTitle("Dữ liệu trên server đang kết nối"), 0, 0);
 
