@@ -93,7 +93,7 @@ public partial class MainForm : Form
         LoadSharedFolders();
         LoadLocalFiles();
         LoadServerFiles();
-        LoadRemoteDemoFiles();
+        
         LoadPermissionsDemo();
         UpdateActionState();
         AddServerLog("Server đang dừng. Thêm thư mục chia sẻ rồi bấm Bật server.", LogType.Info);
@@ -1469,6 +1469,7 @@ public partial class MainForm : Form
             lblConnection.BackColor = SuccessSoft;
             AddClientLog($"Kết nối thành công tới {peer}.", LogType.Success);
             SavePeerFromInputs();
+            await LoadRemoteFilesAsync();
         }
         catch (OperationCanceledException)
         {
@@ -1543,12 +1544,39 @@ public partial class MainForm : Form
             target.Items.Add(CreateFileItem($"{prefix}\\{file.Name}", "Tệp", FormatBytes(file.Length), file.LastWriteTime, file.FullName));
     }
 
-    private void LoadRemoteDemoFiles()
+    private async Task LoadRemoteFilesAsync()
     {
+        if (_client == null || !isConnected) return;
+        
         lvRemoteFiles.Items.Clear();
-        lvRemoteFiles.Items.Add(CreateFileItem("Tài liệu", "Thư mục", "", DateTime.Now.AddDays(-2), "/Documents"));
-        lvRemoteFiles.Items.Add(CreateFileItem("demo-report.pdf", "Tệp", "2.4 MB", DateTime.Now.AddHours(-5), "/Documents/demo-report.pdf"));
-        lvRemoteFiles.Items.Add(CreateFileItem("video-demo.mp4", "Tệp", "118 MB", DateTime.Now.AddDays(-1), "/video-demo.mp4"));
+        string response = await _client.GetListAsync("");
+        var parts = response.Split('|');
+        if (parts.Length > 0 && parts[0] == P2PFileSharingApp.Network.ProtocolMessages.RES_LIST)
+        {
+            for (int i = 1; i < parts.Length; i++)
+            {
+                string item = parts[i];
+                if (string.IsNullOrEmpty(item)) continue;
+                
+                if (item.StartsWith("[DIR]"))
+                {
+                    string name = item.Substring(5);
+                    lvRemoteFiles.Items.Add(CreateFileItem(name, "Thư mục", "", DateTime.Now, name));
+                }
+                else if (item.StartsWith("[FILE]"))
+                {
+                    string fileData = item.Substring(6);
+                    var fileParts = fileData.Split('*');
+                    string name = fileParts[0];
+                    long size = fileParts.Length > 1 && long.TryParse(fileParts[1], out long s) ? s : 0;
+                    lvRemoteFiles.Items.Add(CreateFileItem(name, "Tệp", FormatBytes(size), DateTime.Now, name));
+                }
+            }
+        }
+        else
+        {
+            AddClientLog("Không thể tải danh sách file từ server.", LogType.Error);
+        }
     }
 
     private static ListViewItem CreateFileItem(string name, string type, string size, DateTime modified, string fullPath)
@@ -1683,8 +1711,14 @@ public partial class MainForm : Form
         }
     }
 
-    private void DeleteSelectedRemoteFiles()
+    private async void DeleteSelectedRemoteFiles()
     {
+        if (_client == null || !isConnected)
+        {
+            AddClientLog("Chưa kết nối tới server.", LogType.Error);
+            return;
+        }
+
         if (lvRemoteFiles.SelectedItems.Count == 0)
         {
             AddClientLog("Hãy chọn file trên server khác cần xóa.", LogType.Error);
@@ -1693,14 +1727,17 @@ public partial class MainForm : Form
 
         foreach (ListViewItem item in lvRemoteFiles.SelectedItems.Cast<ListViewItem>().ToList())
         {
-            if (item.Text.Contains("demo", StringComparison.OrdinalIgnoreCase))
+            string fileName = item.Text;
+            var res = await _client.DeleteAsync(fileName);
+            if (res.ok)
             {
-                AddClientLog($"Server từ chối xóa '{item.Text}': file đang được sử dụng.", LogType.Error);
-                continue;
+                lvRemoteFiles.Items.Remove(item);
+                AddClientLog("Đã xóa file trên server khác: " + fileName, LogType.Success);
             }
-
-            lvRemoteFiles.Items.Remove(item);
-            AddClientLog("Đã xóa mục trên server khác: " + item.Text, LogType.Success);
+            else
+            {
+                AddClientLog($"Lỗi xóa '{fileName}': {res.msg}", LogType.Error);
+            }
         }
     }
 
