@@ -1,8 +1,10 @@
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text.RegularExpressions;
 using P2PFileSharingApp.Models;
 
 using P2PFileSharingApp.Network;
@@ -187,7 +189,8 @@ public partial class MainForm : Form
             serversByEndpoint[server.Endpoint] = server;
 
         return serversByEndpoint.Values
-            .OrderBy(server => server.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(server => IsRadminVpnIp(server.IpAddress))
+            .ThenBy(server => server.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(server => server.IpAddress, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -202,16 +205,23 @@ public partial class MainForm : Form
         {
             scanTasks.Add(Task.Run(async () =>
             {
-                await throttle.WaitAsync(cancellationToken);
+                bool entered = false;
                 try
                 {
+                    await throttle.WaitAsync(cancellationToken);
+                    entered = true;
                     return await TryDiscoverServerByTcpAsync(ip, port, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return null;
                 }
                 finally
                 {
-                    throttle.Release();
+                    if (entered)
+                        throttle.Release();
                 }
-            }, cancellationToken));
+            }));
         }
 
         DiscoveredServer?[] results = await Task.WhenAll(scanTasks);
@@ -257,6 +267,12 @@ public partial class MainForm : Form
         HashSet<string> targets = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> localIps = GetLocalIPv4Addresses();
 
+        foreach (string radminIp in GetRadminNeighborIPv4Addresses())
+        {
+            if (!localIps.Contains(radminIp))
+                targets.Add(radminIp);
+        }
+
         foreach (string localIp in localIps)
         {
             string[] parts = localIp.Split('.');
@@ -275,6 +291,53 @@ public partial class MainForm : Form
         return targets;
     }
 
+    private static HashSet<string> GetRadminNeighborIPv4Addresses()
+    {
+        HashSet<string> neighbors = new(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            using Process process = new()
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "netsh",
+                    Arguments = "interface ipv4 show neighbors",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                }
+            };
+
+            process.Start();
+            string output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(1500);
+
+            foreach (string line in output.Split(Environment.NewLine))
+            {
+                if (line.Contains("Unreachable", StringComparison.OrdinalIgnoreCase) ||
+                    line.Contains("Permanent", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                Match match = Regex.Match(line, @"\b26(?:\.\d{1,3}){3}\b");
+                if (match.Success &&
+                    IPAddress.TryParse(match.Value, out IPAddress? ip) &&
+                    IsRadminVpnIp(ip.ToString()) &&
+                    ip.ToString() != "26.255.255.255")
+                {
+                    neighbors.Add(ip.ToString());
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return neighbors;
+    }
+
     private static HashSet<string> GetLocalIPv4Addresses()
     {
         return NetworkInterface.GetAllNetworkInterfaces()
@@ -287,6 +350,11 @@ public partial class MainForm : Form
                 !IPAddress.IsLoopback(address.Address))
             .Select(address => address.Address.ToString())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRadminVpnIp(string ip)
+    {
+        return ip.StartsWith("26.", StringComparison.Ordinal);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -1538,6 +1606,8 @@ public partial class MainForm : Form
         string ip = cboServers.Text.Trim(); 
         if (cboServers.SelectedItem is DiscoveredServer srv && IsSelectedDiscoveredServerText(ip, srv))
             ip = srv.IpAddress;
+        else
+            ip = ExtractFirstIPv4(ip) ?? ip;
         string name = txtDisplayName.Text.Trim();
         int port = (int)numPort.Value;
 
@@ -1556,6 +1626,17 @@ public partial class MainForm : Form
             LastSeen = DateTime.Now
         };
         return true;
+    }
+
+    private static string? ExtractFirstIPv4(string text)
+    {
+        Match match = Regex.Match(text, @"\b(?:\d{1,3}\.){3}\d{1,3}\b");
+        if (!match.Success)
+            return null;
+
+        return IPAddress.TryParse(match.Value, out IPAddress? ip)
+            ? ip.ToString()
+            : null;
     }
 
     private static bool IsSelectedDiscoveredServerText(string text, DiscoveredServer server)

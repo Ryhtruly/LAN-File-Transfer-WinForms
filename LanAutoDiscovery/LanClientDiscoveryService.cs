@@ -30,7 +30,8 @@ public sealed class LanClientDiscoveryService : IAsyncDisposable
 
     public IReadOnlyList<DiscoveredServer> Servers =>
         _servers.Values
-            .OrderBy(server => server.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(server => IsRadminVpnIp(server.IpAddress))
+            .ThenBy(server => server.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
     public void Start()
@@ -95,12 +96,13 @@ public sealed class LanClientDiscoveryService : IAsyncDisposable
                     },
                     (_, existing) =>
                     {
+                        string ipAddress = PreferDiscoveredIp(existing.IpAddress, packet.IpAddress);
                         existing.LastSeenUtc = DateTime.UtcNow;
                         return new DiscoveredServer
                         {
                             ServerId = packet.ServerId,
                             DisplayName = packet.DisplayName,
-                            IpAddress = packet.IpAddress,
+                            IpAddress = ipAddress,
                             Port = packet.Port,
                             LastSeenUtc = existing.LastSeenUtc
                         };
@@ -149,6 +151,25 @@ public sealed class LanClientDiscoveryService : IAsyncDisposable
 
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private static string PreferDiscoveredIp(string existingIp, string newIp)
+    {
+        bool existingIsRadmin = IsRadminVpnIp(existingIp);
+        bool newIsRadmin = IsRadminVpnIp(newIp);
+
+        if (existingIsRadmin && !newIsRadmin)
+            return existingIp;
+
+        if (newIsRadmin && !existingIsRadmin)
+            return newIp;
+
+        return newIp;
+    }
+
+    private static bool IsRadminVpnIp(string ip)
+    {
+        return ip.StartsWith("26.", StringComparison.Ordinal);
     }
 
     private void RaiseServersChanged()
