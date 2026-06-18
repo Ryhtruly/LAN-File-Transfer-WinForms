@@ -31,6 +31,7 @@ namespace P2PFileSharingApp.Network
         public event Action<string>? OnLog;
         public event Action<string>? OnClientConnected;     // ip
         public event Action<string>? OnClientDisconnected;  // ip
+        public event Func<string, PermissionLevel?>? OnClientApprovalRequested;
 
         public bool IsRunning => _isRunning;
 
@@ -82,6 +83,20 @@ namespace P2PFileSharingApp.Network
                     var client = _listener!.AcceptTcpClient();
                     var ip = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString();
 
+                    PermissionLevel permission = PermissionLevel.ReadOnly;
+                    if (OnClientApprovalRequested != null)
+                    {
+                        PermissionLevel? approvedPermission = OnClientApprovalRequested.Invoke(ip);
+                        if (approvedPermission == null)
+                        {
+                            Log($"Kết nối từ {ip} đã bị từ chối.");
+                            client.Close();
+                            continue;
+                        }
+
+                        permission = approvedPermission.Value;
+                    }
+
                     // Nếu IP này đã có kết nối cũ, đóng kết nối cũ đi
                     if (_connectedClients.TryRemove(ip, out var old))
                         old.Close();
@@ -89,7 +104,7 @@ namespace P2PFileSharingApp.Network
                     _connectedClients[ip] = client;
 
                     // Đảm bảo IP mới luôn có quyền (mặc định ReadOnly)
-                    var _ = PermissionManager.GetPermission(ip);
+                    PermissionManager.SetPermission(ip, permission);
 
                     Log($"🟢 Kết nối mới từ: {ip}");
                     OnClientConnected?.Invoke(ip);
