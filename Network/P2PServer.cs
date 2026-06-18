@@ -84,49 +84,7 @@ namespace P2PFileSharingApp.Network
                     var client = _listener!.AcceptTcpClient();
                     var ip = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString();
 
-                    // Read HELLO line from client
-                    var stream = client.GetStream();
-                    var reader = new StreamReader(stream, Encoding.UTF8);
-                    var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
-
-                    string displayName = ip;
-                    string? firstLine = reader.ReadLine();
-                    if (firstLine != null && firstLine.StartsWith("HELLO|"))
-                    {
-                        displayName = firstLine.Substring(6);
-                    }
-                    else
-                    {
-                        // Handle clients that do not send HELLO by treating first line as first command.
-                    }
-
-                    PermissionLevel permission = PermissionLevel.ReadOnly;
-                    if (OnClientApprovalRequested != null)
-                    {
-                        PermissionLevel? approvedPermission = OnClientApprovalRequested.Invoke(ip, displayName);
-                        if (approvedPermission == null)
-                        {
-                            Log($"Kết nối từ {ip} đã bị từ chối.");
-                            client.Close();
-                            continue;
-                        }
-
-                        permission = approvedPermission.Value;
-                    }
-
-                    // Nếu IP này đã có kết nối cũ, đóng kết nối cũ đi
-                    if (_connectedClients.TryRemove(ip, out var old))
-                        old.Close();
-
-                    _connectedClients[ip] = client;
-
-                    // Đảm bảo IP mới luôn có quyền (mặc định ReadOnly)
-                    PermissionManager.SetPermission(ip, permission);
-
-                    Log($"🟢 Kết nối mới từ: {ip}");
-                    OnClientConnected?.Invoke(ip);
-
-                    var t = new Thread(() => HandleClient(client, ip, stream, reader, writer, firstLine != null && !firstLine.StartsWith("HELLO|") ? firstLine : null)) { IsBackground = true };
+                    var t = new Thread(() => HandleClient(client, ip)) { IsBackground = true };
                     t.Start();
                 }
                 catch { if (!_isRunning) break; }
@@ -135,10 +93,68 @@ namespace P2PFileSharingApp.Network
 
         // ─────────────────── HANDLE CLIENT ───────────────────
 
-        private void HandleClient(TcpClient client, string clientIP, NetworkStream stream, StreamReader reader, StreamWriter writer, string? pendingCommand)
+        private void HandleClient(TcpClient client, string clientIP)
         {
             try
             {
+                var stream = client.GetStream();
+                stream.ReadTimeout = 5000; // 5 seconds timeout for initial handshake
+                var reader = new StreamReader(stream, Encoding.UTF8);
+                var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+
+                string displayName = clientIP;
+                string? firstLine;
+                try
+                {
+                    firstLine = reader.ReadLine();
+                }
+                catch (IOException)
+                {
+                    // Timeout or disconnected
+                    firstLine = null;
+                }
+
+                stream.ReadTimeout = Timeout.Infinite; // reset timeout
+
+                string? pendingCommand = null;
+
+                if (firstLine != null && firstLine.StartsWith("HELLO|"))
+                {
+                    displayName = firstLine.Substring(6);
+                }
+                else if (firstLine != null)
+                {
+                    pendingCommand = firstLine;
+                }
+                else
+                {
+                    // client closed connection immediately
+                    client.Close();
+                    return;
+                }
+
+                PermissionLevel permission = PermissionLevel.ReadOnly;
+                if (OnClientApprovalRequested != null)
+                {
+                    PermissionLevel? approvedPermission = OnClientApprovalRequested.Invoke(clientIP, displayName);
+                    if (approvedPermission == null)
+                    {
+                        Log($"Kết nối từ {clientIP} đã bị từ chối.");
+                        client.Close();
+                        return;
+                    }
+                    permission = approvedPermission.Value;
+                }
+
+                if (_connectedClients.TryRemove(clientIP, out var old))
+                    old.Close();
+
+                _connectedClients[clientIP] = client;
+                PermissionManager.SetPermission(clientIP, permission);
+
+                Log($"🟢 Kết nối mới từ: {clientIP}");
+                OnClientConnected?.Invoke(clientIP);
+
                 // Gửi ngay mức quyền cho Client khi vừa kết nối
                 writer.WriteLine($"{ProtocolMessages.RES_OK}|{PermissionManager.GetPermission(clientIP)}");
 

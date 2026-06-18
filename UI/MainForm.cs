@@ -2089,8 +2089,11 @@ public partial class MainForm : Form
                 string destinationPath = GetUniqueDownloadPath(Path.Combine(localRoot, safeFileName));
 
                 AddClientLog($"Bắt đầu tải về: {item.Text} → {localRoot}", LogType.Info);
-                await _client!.DownloadAsync(item.Text, Path.GetDirectoryName(destinationPath)!, progress, transferCts.Token);
-                AddClientLog("Tải về thành công: " + destinationPath, LogType.Success);
+                var res = await _client!.DownloadAsync(item.Text, Path.GetDirectoryName(destinationPath)!, progress, transferCts.Token);
+                if (res.ok)
+                    AddClientLog("Tải về thành công: " + destinationPath, LogType.Success);
+                else
+                    AddClientLog($"Lỗi tải về: {res.msg}", LogType.Error);
             }
 
             LoadLocalFiles();
