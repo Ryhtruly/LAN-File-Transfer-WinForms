@@ -23,33 +23,25 @@ namespace P2PFileSharingApp.Network
 
         // ─────────────────── CONNECT / DISCONNECT ───────────────────
 
-        public async Task<(bool ok, string message, string permission)> ConnectAsync(
-            string ip,
-            int port,
-            System.Threading.CancellationToken cancellationToken = default)
+        public async Task<(bool ok, string message, string permission)> ConnectAsync(string ip, int port)
         {
             try
             {
                 _client = new TcpClient();
-                await _client.ConnectAsync(ip, port, cancellationToken);
+                await _client.ConnectAsync(ip, port);
 
                 _stream = _client.GetStream();
                 _reader = new StreamReader(_stream, Encoding.UTF8);
                 _writer = new StreamWriter(_stream, Encoding.UTF8) { AutoFlush = true };
 
                 // Đọc câu chào từ Server để lấy phân quyền
-                string? welcome = await _reader.ReadLineAsync(cancellationToken);
+                string? welcome = await _reader.ReadLineAsync();
                 string permission = "ReadOnly"; // mặc định
                 if (welcome != null && welcome.StartsWith(ProtocolMessages.RES_OK))
                 {
                     var parts = welcome.Split('|');
                     if (parts.Length > 1)
                         permission = parts[1];
-                }
-                else
-                {
-                    Disconnect();
-                    return (false, "Máy đích không trả đúng protocol P2P.", "ReadOnly");
                 }
 
                 Log($"✅ Kết nối thành công tới {ip}:{port} (Quyền: {permission})");

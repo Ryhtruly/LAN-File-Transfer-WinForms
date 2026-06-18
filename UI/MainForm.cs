@@ -3,7 +3,6 @@ using System.Drawing.Drawing2D;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Text;
 using P2PFileSharingApp.Models;
 
 using P2PFileSharingApp.Network;
@@ -236,15 +235,6 @@ public partial class MainForm : Form
             await connectTask;
 
             if (!client.Connected)
-                return null;
-
-            using NetworkStream stream = client.GetStream();
-            using StreamReader reader = new(stream, Encoding.UTF8, leaveOpen: false);
-            using CancellationTokenSource readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            readCts.CancelAfter(500);
-
-            string? welcome = await reader.ReadLineAsync(readCts.Token);
-            if (welcome == null || !welcome.StartsWith(ProtocolMessages.RES_OK, StringComparison.Ordinal))
                 return null;
 
             return new DiscoveredServer
@@ -1618,7 +1608,7 @@ public partial class MainForm : Form
             _client = new P2PClient();
             _client.OnLog += msg => AddClientLog(msg, LogType.Info);
             
-            var res = await _client.ConnectAsync(peer.IpAddress, peer.Port, connectCts.Token);
+            var res = await _client.ConnectAsync(peer.IpAddress, peer.Port);
             if (!res.ok) throw new Exception(res.message);
 
             isConnected = true;
