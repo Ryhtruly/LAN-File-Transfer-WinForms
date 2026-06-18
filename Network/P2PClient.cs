@@ -20,6 +20,7 @@ namespace P2PFileSharingApp.Network
 
         public event Action<string>? OnLog;
         public bool IsConnected => _client?.Connected ?? false;
+        public string MyDisplayName { get; set; } = "Máy khách";
 
         // ─────────────────── CONNECT / DISCONNECT ───────────────────
 
@@ -33,6 +34,8 @@ namespace P2PFileSharingApp.Network
                 _stream = _client.GetStream();
                 _reader = new StreamReader(_stream, Encoding.UTF8);
                 _writer = new StreamWriter(_stream, Encoding.UTF8) { AutoFlush = true };
+
+                await _writer.WriteLineAsync($"HELLO|{MyDisplayName}");
 
                 // Đọc câu chào từ Server để lấy phân quyền
                 string? welcome = await _reader.ReadLineAsync();

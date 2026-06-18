@@ -277,8 +277,8 @@ namespace P2PFileSharingApp.Core
                 const int BUFFER_SIZE = 8192;
                 byte[] buffer = new byte[BUFFER_SIZE];
 
+                var networkStream = getNetworkStream();
                 using (var fs = File.OpenRead(filePath))
-                using (var networkStream = getNetworkStream())
                 {
                     int bytesRead;
                     while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
@@ -326,8 +326,8 @@ namespace P2PFileSharingApp.Core
                 const int BUFFER_SIZE = 8192;
                 byte[] buffer = new byte[BUFFER_SIZE];
 
+                var networkStream = getNetworkStream();
                 using (var fs = File.Create(filePath))
-                using (var networkStream = getNetworkStream())
                 {
                     while (bytesReceived < fileSize)
                     {

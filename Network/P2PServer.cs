@@ -24,14 +24,15 @@ namespace P2PFileSharingApp.Network
         public string SharedFolderPath { get; set; } = string.Empty;
 
         // Danh sách các client đang kết nối: IP → TcpClient
-        private readonly ConcurrentDictionary<string, TcpClient> _connectedClients
-            = new ConcurrentDictionary<string, TcpClient>();
+        private readonly ConcurrentDictionary<string, TcpClient> _connectedClients = new();
+        public IEnumerable<string> ConnectedClientIPs => _connectedClients.Keys;
 
         // Events để giao diện cập nhật realtime
         public event Action<string>? OnLog;
         public event Action<string>? OnClientConnected;     // ip
         public event Action<string>? OnClientDisconnected;  // ip
-        public event Func<string, PermissionLevel?>? OnClientApprovalRequested;
+        public event Func<string, string, PermissionLevel?>? OnClientApprovalRequested;
+        public event Action? OnSharedFolderChanged;
 
         public bool IsRunning => _isRunning;
 
@@ -83,10 +84,26 @@ namespace P2PFileSharingApp.Network
                     var client = _listener!.AcceptTcpClient();
                     var ip = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString();
 
+                    // Read HELLO line from client
+                    var stream = client.GetStream();
+                    var reader = new StreamReader(stream, Encoding.UTF8);
+                    var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+
+                    string displayName = ip;
+                    string? firstLine = reader.ReadLine();
+                    if (firstLine != null && firstLine.StartsWith("HELLO|"))
+                    {
+                        displayName = firstLine.Substring(6);
+                    }
+                    else
+                    {
+                        // Handle clients that do not send HELLO by treating first line as first command.
+                    }
+
                     PermissionLevel permission = PermissionLevel.ReadOnly;
                     if (OnClientApprovalRequested != null)
                     {
-                        PermissionLevel? approvedPermission = OnClientApprovalRequested.Invoke(ip);
+                        PermissionLevel? approvedPermission = OnClientApprovalRequested.Invoke(ip, displayName);
                         if (approvedPermission == null)
                         {
                             Log($"Kết nối từ {ip} đã bị từ chối.");
@@ -109,7 +126,7 @@ namespace P2PFileSharingApp.Network
                     Log($"🟢 Kết nối mới từ: {ip}");
                     OnClientConnected?.Invoke(ip);
 
-                    var t = new Thread(() => HandleClient(client, ip)) { IsBackground = true };
+                    var t = new Thread(() => HandleClient(client, ip, stream, reader, writer, firstLine != null && !firstLine.StartsWith("HELLO|") ? firstLine : null)) { IsBackground = true };
                     t.Start();
                 }
                 catch { if (!_isRunning) break; }
@@ -118,16 +135,18 @@ namespace P2PFileSharingApp.Network
 
         // ─────────────────── HANDLE CLIENT ───────────────────
 
-        private void HandleClient(TcpClient client, string clientIP)
+        private void HandleClient(TcpClient client, string clientIP, NetworkStream stream, StreamReader reader, StreamWriter writer, string? pendingCommand)
         {
             try
             {
-                using var stream = client.GetStream();
-                using var reader = new StreamReader(stream, Encoding.UTF8);
-                using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
-
                 // Gửi ngay mức quyền cho Client khi vừa kết nối
                 writer.WriteLine($"{ProtocolMessages.RES_OK}|{PermissionManager.GetPermission(clientIP)}");
+
+                if (pendingCommand != null)
+                {
+                    Log($"[{clientIP}] ← {pendingCommand}");
+                    ProcessCommand(pendingCommand, clientIP, stream, reader, writer);
+                }
 
                 while (client.Connected && _isRunning)
                 {

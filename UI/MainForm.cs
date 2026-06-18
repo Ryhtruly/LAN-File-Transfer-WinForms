@@ -33,6 +33,7 @@ public partial class MainForm : Form
     private readonly LanClientDiscoveryService _discoveryService = new();
     private P2PClient? _client;
     private LanServerBroadcaster? _serverBroadcaster;
+    private FileSystemWatcher? _serverWatcher;
     private string P2PSharedRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "P2PSharedRoot");
     private readonly ToolTip toolTips = new();
     private readonly ImageList fileIcons = new();
@@ -64,6 +65,7 @@ public partial class MainForm : Form
 
     private ComboBox cboPeers = null!;
     private TextBox txtDisplayName = null!;
+    private TextBox txtMyProfileName = null!;
     private ComboBox cboServers = null!;
     private bool isBindingDiscoveredServers;
     private NumericUpDown numPort = null!;
@@ -78,8 +80,10 @@ public partial class MainForm : Form
     private Button btnChooseFolder = null!;
     private Button btnUpload = null!;
     private Button btnDownload = null!;
+    private Button btnRenameRemoteFile = null!;
     private Button btnDelete = null!;
     private Button btnReloadRemote = null!;
+    private string currentRemotePath = "";
     private Button btnCancelTransfer = null!;
 
     private RoundedProgressBar progressTransfer = null!;
@@ -104,6 +108,20 @@ public partial class MainForm : Form
         LoadPeers();
         LoadLocalFiles();
         LoadServerFiles();
+
+        _serverWatcher = new FileSystemWatcher(P2PSharedRoot)
+        {
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite,
+            IncludeSubdirectories = true
+        };
+        FileSystemEventHandler handler = (s, e) => Invoke(() => LoadServerFiles());
+        RenamedEventHandler renamedHandler = (s, e) => Invoke(() => LoadServerFiles());
+        _serverWatcher.Created += handler;
+        _serverWatcher.Deleted += handler;
+        _serverWatcher.Changed += handler;
+        _serverWatcher.Renamed += renamedHandler;
+        _serverWatcher.EnableRaisingEvents = true;
+        _server.OnSharedFolderChanged += () => Invoke(() => LoadServerFiles());
         
         LoadPermissionsDemo();
         UpdateActionState();
@@ -653,7 +671,7 @@ public partial class MainForm : Form
         cboPermissionIp = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDown };
         cboPermissionIp.DropDown += (_, _) => {
             cboPermissionIp.Items.Clear();
-            foreach(var peer in peers) cboPermissionIp.Items.Add(peer.Key);
+            foreach(var ip in _server.ConnectedClientIPs) cboPermissionIp.Items.Add(ip);
         };
         editor.Controls.Add(cboPermissionIp, 0, 0);
         txtPermissionName = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "Tên hiển thị" };
@@ -726,7 +744,12 @@ public partial class MainForm : Form
 
         Label title = SectionTitle("Kết nối server khác");
         panel.Controls.Add(title, 0, 0);
-        panel.SetColumnSpan(title, 8);
+        panel.SetColumnSpan(title, 5);
+
+        panel.Controls.Add(FieldLabel("Hồ sơ hiển thị:"), 5, 0);
+        txtMyProfileName = new TextBox { Dock = DockStyle.Fill, Text = "Máy của tôi" };
+        panel.Controls.Add(txtMyProfileName, 6, 0);
+        panel.SetColumnSpan(txtMyProfileName, 2);
 
         panel.Controls.Add(FieldLabel("Máy đã lưu"), 0, 1);
         panel.Controls.Add(FieldLabel("Tên hiển thị"), 1, 1);
@@ -814,25 +837,9 @@ public partial class MainForm : Form
 
     private Control BuildClientFilePanel()
     {
-        TableLayoutPanel grid = new()
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
-            BackColor = AppBack
-        };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-
-        Control localPanel = BuildLocalPanel();
         Control remotePanel = BuildRemotePanel();
-        localPanel.Margin = new Padding(0, 0, 8, 0);
-        remotePanel.Margin = new Padding(8, 0, 0, 0);
-
-        grid.Controls.Add(localPanel, 0, 0);
-        grid.Controls.Add(remotePanel, 1, 0);
-
-        return grid;
+        remotePanel.Margin = new Padding(0);
+        return remotePanel;
     }
 
     private Control BuildLocalPanel()
@@ -864,7 +871,7 @@ public partial class MainForm : Form
 
     private Control BuildRemotePanel()
     {
-        TableLayoutPanel panel = CreatePanel(5, 2);
+        TableLayoutPanel panel = CreatePanel(7, 2);
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -873,24 +880,32 @@ public partial class MainForm : Form
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 47));
 
         panel.Controls.Add(SectionTitle("Dữ liệu trên server đang kết nối"), 0, 0);
 
-        btnUpload = IconButton("↑", "Tải file từ máy mình lên server khác");
-        btnUpload.Click += async (_, _) => await UploadSelectedLocalFilesAsync();
+        btnUpload = IconButton("↑", "Tải file/thư mục lên server khác");
+        ContextMenuStrip uploadMenu = new ContextMenuStrip();
+        uploadMenu.Items.Add("Tải File", null, async (_, _) => await UploadFileFromPickerAsync());
+        uploadMenu.Items.Add("Tải Thư mục", null, async (_, _) => await UploadFolderFromPickerAsync());
+        btnUpload.Click += (s, e) => uploadMenu.Show(btnUpload, new Point(0, btnUpload.Height));
         panel.Controls.Add(btnUpload, 1, 0);
 
         btnDownload = IconButton("↓", "Tải file từ server khác về máy mình");
         btnDownload.Click += async (_, _) => await DownloadSelectedRemoteFilesAsync();
         panel.Controls.Add(btnDownload, 2, 0);
 
+        btnRenameRemoteFile = IconButton("✎", "Đổi tên file/thư mục");
+        btnRenameRemoteFile.Click += async (_, _) => await RenameSelectedRemoteItem();
+        panel.Controls.Add(btnRenameRemoteFile, 3, 0);
+
         btnDelete = IconButton("✕", "Xóa file đang chọn trên server khác");
         btnDelete.Click += (_, _) => DeleteSelectedRemoteFiles();
-        panel.Controls.Add(btnDelete, 3, 0);
+        panel.Controls.Add(btnDelete, 4, 0);
 
-        btnReloadRemote = IconButton("R", "Tai lai danh sach file tren server dang ket noi");
+        btnReloadRemote = IconButton("R", "Tải lại danh sách file trên server đang kết nối");
         btnReloadRemote.Click += async (_, _) => await ReloadRemoteFilesAsync();
-        panel.Controls.Add(btnReloadRemote, 4, 0);
+        panel.Controls.Add(btnReloadRemote, 5, 0);
 
         btnCancelTransfer = IconButton("⏹", "Dừng tiến trình tải lên hoặc tải về");
         btnCancelTransfer.Click += (_, _) =>
@@ -903,15 +918,16 @@ public partial class MainForm : Form
 
             transferCts.Cancel();
         };
-        panel.Controls.Add(btnCancelTransfer, 5, 0);
+        panel.Controls.Add(btnCancelTransfer, 6, 0);
 
         lvRemoteFiles = CreateFileListView();
         lvRemoteFiles.AllowDrop = true;
         lvRemoteFiles.SelectedIndexChanged += (_, _) => UpdateActionState();
+        lvRemoteFiles.DoubleClick += lvRemoteFiles_DoubleClick;
         lvRemoteFiles.DragEnter += lvRemoteFiles_DragEnter;
         lvRemoteFiles.DragDrop += lvRemoteFiles_DragDrop;
         toolTips.SetToolTip(lvRemoteFiles, "Kéo thả file từ Desktop hoặc File Explorer vào đây để tải lên server khác.");
-        panel.SetColumnSpan(lvRemoteFiles, 6);
+        panel.SetColumnSpan(lvRemoteFiles, 7);
         panel.Controls.Add(lvRemoteFiles, 0, 1);
         return panel;
     }
@@ -1555,92 +1571,67 @@ public partial class MainForm : Form
         AddServerLog($"Đã cập nhật quyền '{permission}' cho {ip}.", LogType.Success);
     }
 
-    private P2PFileSharingApp.Core.PermissionLevel? RequestClientPermission(string ip)
+    private P2PFileSharingApp.Core.PermissionLevel? RequestClientPermission(string ip, string displayName)
     {
         if (InvokeRequired)
         {
             return (P2PFileSharingApp.Core.PermissionLevel?)Invoke(
-                new Func<P2PFileSharingApp.Core.PermissionLevel?>(() => RequestClientPermission(ip)));
+                new Func<P2PFileSharingApp.Core.PermissionLevel?>(() => RequestClientPermission(ip, displayName)));
         }
 
         using Form dialog = new()
         {
-            Text = "Yeu cau ket noi",
+            Text = "Yêu cầu kết nối",
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MinimizeBox = false,
             MaximizeBox = false,
-            ClientSize = new Size(360, 190),
+            ClientSize = new Size(360, 200),
             Font = Font
         };
 
-        TableLayoutPanel layout = new()
-        {
-            Dock = DockStyle.Fill,
-            Padding = new Padding(14),
-            ColumnCount = 2,
-            RowCount = 5
-        };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-        dialog.Controls.Add(layout);
-
         Label message = new()
         {
-            Dock = DockStyle.Fill,
-            Text = $"May {ip} muon ket noi toi server.",
+            Bounds = new Rectangle(15, 15, 330, 30),
+            Text = $"Máy {displayName} ({ip}) muốn kết nối tới server.",
             ForeColor = Ink,
             TextAlign = ContentAlignment.MiddleLeft
         };
-        layout.Controls.Add(message, 0, 0);
-        layout.SetColumnSpan(message, 2);
+        dialog.Controls.Add(message);
 
-        layout.Controls.Add(FieldLabel("Ten hien thi"), 0, 1);
-        TextBox txtName = new() { Dock = DockStyle.Fill, Text = ip };
-        layout.Controls.Add(txtName, 1, 1);
+        dialog.Controls.Add(new Label { Text = "Tên hiển thị", Bounds = new Rectangle(15, 50, 90, 25), TextAlign = ContentAlignment.MiddleLeft });
+        TextBox txtName = new() { Bounds = new Rectangle(105, 50, 230, 25), Text = displayName };
+        dialog.Controls.Add(txtName);
 
-        layout.Controls.Add(FieldLabel("Quyen"), 0, 2);
-        ComboBox cboMode = new()
-        {
-            Dock = DockStyle.Fill,
-            DropDownStyle = ComboBoxStyle.DropDownList
-        };
+        dialog.Controls.Add(new Label { Text = "Quyền", Bounds = new Rectangle(15, 90, 90, 25), TextAlign = ContentAlignment.MiddleLeft });
+        ComboBox cboMode = new() { Bounds = new Rectangle(105, 90, 230, 25), DropDownStyle = ComboBoxStyle.DropDownList };
         cboMode.Items.AddRange(["Chỉ tải về", "Chỉ tải lên", "Tải lên và tải về", "Toàn quyền"]);
         cboMode.SelectedIndex = 0;
-        layout.Controls.Add(cboMode, 1, 2);
+        dialog.Controls.Add(cboMode);
 
-        FlowLayoutPanel buttons = new()
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false
-        };
-        Button allow = PrimaryButton("Cho phep");
-        Button deny = SecondaryButton("Tu choi");
+        Button allow = PrimaryButton("OK");
+        allow.Bounds = new Rectangle(245, 140, 90, 35);
         allow.DialogResult = DialogResult.OK;
+        
+        Button deny = SecondaryButton("Từ chối");
+        deny.Bounds = new Rectangle(145, 140, 90, 35);
         deny.DialogResult = DialogResult.Cancel;
-        buttons.Controls.Add(allow);
-        buttons.Controls.Add(deny);
-        layout.Controls.Add(buttons, 0, 4);
-        layout.SetColumnSpan(buttons, 2);
+
+        dialog.Controls.Add(allow);
+        dialog.Controls.Add(deny);
         dialog.AcceptButton = allow;
         dialog.CancelButton = deny;
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
-            AddServerLog($"Da tu choi ket noi tu {ip}.", LogType.Info);
+            AddServerLog($"Đã từ chối kết nối từ {ip}.", LogType.Info);
             return null;
         }
 
         string permission = cboMode.SelectedItem?.ToString() ?? "Chỉ tải về";
         string name = string.IsNullOrWhiteSpace(txtName.Text) ? ip : txtName.Text.Trim();
         UpsertPermissionRow(ip, permission, name);
-        AddServerLog($"Da cho phep {ip} voi quyen '{permission}'.", LogType.Success);
+        AddServerLog($"Đã cho phép {ip} với quyền '{permission}'.", LogType.Success);
         return PermissionTextToLevel(permission);
     }
 
@@ -1873,12 +1864,12 @@ public partial class MainForm : Form
         _client = null;
         isConnected = false;
         remotePermission = "ReadOnly";
-        btnConnect.Text = "Káº¿t ná»‘i";
-        lblConnection.Text = "ChÆ°a káº¿t ná»‘i";
+        btnConnect.Text = "Kết nối";
+        lblConnection.Text = "Chưa kết nối";
         lblConnection.ForeColor = Muted;
         lblConnection.BackColor = NeutralBadge;
         lvRemoteFiles.Items.Clear();
-        AddClientLog("Da ngat ket noi khoi server.", LogType.Info);
+        AddClientLog("Đã ngắt kết nối khỏi server.", LogType.Info);
         UpdateActionState();
     }
 
@@ -1920,7 +1911,9 @@ public partial class MainForm : Form
         if (_client == null || !isConnected) return;
         
         lvRemoteFiles.Items.Clear();
-        string response = await _client.GetListAsync("");
+        lvRemoteFiles.Items.Add(CreateFileItem("..", "Thư mục", "", DateTime.Now, ".."));
+        
+        string response = await _client.GetListAsync(currentRemotePath);
         var parts = response.Split('|');
         if (parts.Length > 0 && parts[0] == P2PFileSharingApp.Network.ProtocolMessages.RES_LIST)
         {
@@ -1954,12 +1947,12 @@ public partial class MainForm : Form
     {
         if (_client == null || !isConnected)
         {
-            AddClientLog("Chua ket noi toi server khac.", LogType.Error);
+            AddClientLog("Chưa kết nối tới server khác.", LogType.Error);
             return;
         }
 
         await LoadRemoteFilesAsync();
-        AddClientLog("Da tai lai danh sach file tren server.", LogType.Info);
+        AddClientLog("Đã tải lại danh sách file trên server.", LogType.Info);
         UpdateActionState();
     }
 
@@ -1974,75 +1967,98 @@ public partial class MainForm : Form
         return item;
     }
 
-    private async Task UploadSelectedLocalFilesAsync()
+    private async Task UploadFileFromPickerAsync()
     {
-        List<string> files = lvLocalFiles.SelectedItems
-            .Cast<ListViewItem>()
-            .Select(item => item.Tag?.ToString() ?? "")
-            .Where(File.Exists)
-            .ToList();
-
-        if (files.Count == 0)
+        if (_client == null || !isConnected) return;
+        using OpenFileDialog ofd = new OpenFileDialog { Multiselect = true, Title = "Chọn file để tải lên" };
+        if (ofd.ShowDialog() == DialogResult.OK)
         {
-            AddClientLog("Hãy chọn ít nhất một file trên máy mình để tải lên.", LogType.Error);
-            return;
+            foreach (var file in ofd.FileNames)
+                await _client.UploadAsync(file, currentRemotePath);
+            await ReloadRemoteFilesAsync();
         }
-
-        await UploadFilesAsync(files);
     }
 
-    private async Task UploadFilesAsync(IEnumerable<string> filePaths)
+    private async Task UploadFolderFromPickerAsync()
     {
-        if (!isConnected)
+        if (_client == null || !isConnected) return;
+        using FolderBrowserDialog fbd = new FolderBrowserDialog { Description = "Chọn thư mục để tải lên" };
+        if (fbd.ShowDialog() == DialogResult.OK)
         {
-            AddClientLog("Chưa kết nối tới server khác.", LogType.Error);
-            return;
+            await _client.UploadDirectoryAsync(fbd.SelectedPath, currentRemotePath);
+            await ReloadRemoteFilesAsync();
         }
+    }
 
-        SetTransferRunning(true);
-        transferCts = new CancellationTokenSource();
-
-        Progress<TransferProgress> progress = new(UpdateTransferProgress);
-
-        try
+    private string? PromptText(string title, string prompt, string defaultValue = "")
+    {
+        using Form form = new Form
         {
-            foreach (string filePath in filePaths)
+            Width = 400,
+            Height = 150,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            Text = title,
+            StartPosition = FormStartPosition.CenterParent
+        };
+        Label lbl = new Label { Left = 20, Top = 20, Text = prompt, AutoSize = true };
+        TextBox txt = new TextBox { Left = 20, Top = 45, Width = 340, Text = defaultValue };
+        Button btnOk = new Button { Text = "OK", Left = 260, Top = 80, DialogResult = DialogResult.OK };
+        form.Controls.Add(lbl);
+        form.Controls.Add(txt);
+        form.Controls.Add(btnOk);
+        form.AcceptButton = btnOk;
+        return form.ShowDialog() == DialogResult.OK ? txt.Text : null;
+    }
+
+    private async Task RenameSelectedRemoteItem()
+    {
+        if (lvRemoteFiles.SelectedItems.Count != 1) return;
+
+        ListViewItem item = lvRemoteFiles.SelectedItems[0];
+        string name = item.Text;
+        if (name == "..") return;
+
+        string? newName = PromptText("Đổi tên", "Tên mới:", name);
+        if (string.IsNullOrWhiteSpace(newName) || newName == name)
+            return;
+
+        string oldPath = string.IsNullOrEmpty(currentRemotePath) ? name : $"{currentRemotePath}/{name}";
+
+        if (_client == null || !isConnected) return;
+        var result = await _client.RenameAsync(oldPath, newName);
+        if (result.ok)
+        {
+            AddClientLog(result.msg, LogType.Success);
+            await ReloadRemoteFilesAsync();
+        }
+        else
+        {
+            AddClientLog($"Đổi tên thất bại: {result.msg}", LogType.Error);
+        }
+    }
+
+    private async void lvRemoteFiles_DoubleClick(object? sender, EventArgs e)
+    {
+        if (lvRemoteFiles.SelectedItems.Count != 1) return;
+        var item = lvRemoteFiles.SelectedItems[0];
+        if (item.SubItems[1].Text == "Thư mục")
+        {
+            string name = item.Text;
+            if (name == "..")
             {
-                AddClientLog("Bắt đầu tải lên: " + Path.GetFileName(filePath), LogType.Info);
-                await _client!.UploadAsync(filePath, "", progress, transferCts.Token);
-                AddUploadedFileToRemote(filePath);
-                AddClientLog("Tải lên thành công: " + Path.GetFileName(filePath), LogType.Success);
+                if (string.IsNullOrEmpty(currentRemotePath)) return;
+                int lastSlash = currentRemotePath.LastIndexOf('/');
+                if (lastSlash > 0)
+                    currentRemotePath = currentRemotePath.Substring(0, lastSlash);
+                else
+                    currentRemotePath = "";
             }
+            else
+            {
+                currentRemotePath = string.IsNullOrEmpty(currentRemotePath) ? name : $"{currentRemotePath}/{name}";
+            }
+            await ReloadRemoteFilesAsync();
         }
-        catch (OperationCanceledException)
-        {
-            AddClientLog("Đã hủy truyền file.", LogType.Error);
-        }
-        catch (IOException ex)
-        {
-            AddClientLog("Không đọc được file: " + ex.Message, LogType.Error);
-        }
-        catch (Exception ex)
-        {
-            AddClientLog("Tải lên thất bại: " + ex.Message, LogType.Error);
-        }
-        finally
-        {
-            transferCts?.Dispose();
-            transferCts = null;
-            SetTransferRunning(false);
-        }
-    }
-
-    private void AddUploadedFileToRemote(string filePath)
-    {
-        FileInfo fileInfo = new(filePath);
-        lvRemoteFiles.Items.Add(CreateFileItem(
-            fileInfo.Name,
-            "Tệp",
-            FormatBytes(fileInfo.Length),
-            DateTime.Now,
-            "/" + fileInfo.Name));
     }
 
     private async Task DownloadSelectedRemoteFilesAsync()
@@ -2166,6 +2182,7 @@ public partial class MainForm : Form
         btnUpload.Enabled = isConnected && canUpload;
         btnDownload.Enabled = isConnected && hasSelection && canDownload;
         btnDelete.Enabled = isConnected && hasSelection && canEdit;
+        btnRenameRemoteFile.Enabled = isConnected && lvRemoteFiles.SelectedItems.Count == 1 && canEdit;
         btnReloadRemote.Enabled = isConnected;
     }
 
@@ -2183,14 +2200,26 @@ public partial class MainForm : Form
             return;
 
         string[] dropped = (string[])e.Data.GetData(DataFormats.FileDrop)!;
-        List<string> files = dropped.Where(File.Exists).ToList();
-        if (files.Count == 0)
+        if (dropped.Length == 0) return;
+
+        if (_client == null || !isConnected)
         {
-            AddClientLog("Chỉ hỗ trợ kéo thả file, không tải lên thư mục.", LogType.Error);
+            AddClientLog("Chưa kết nối tới server.", LogType.Error);
             return;
         }
 
-        await UploadFilesAsync(files);
+        foreach (string path in dropped)
+        {
+            if (Directory.Exists(path))
+            {
+                await _client.UploadDirectoryAsync(path, currentRemotePath);
+            }
+            else if (File.Exists(path))
+            {
+                await _client.UploadAsync(path, currentRemotePath);
+            }
+        }
+        await ReloadRemoteFilesAsync();
     }
 
     private void AddServerLog(string message, LogType type)
