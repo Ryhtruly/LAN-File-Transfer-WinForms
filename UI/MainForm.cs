@@ -498,23 +498,21 @@ public partial class MainForm : Form
             ColumnCount = 2,
             BackColor = AppBack
         };
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 34));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 48));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        Label logo = new()
+        PictureBox logo = new()
         {
             Dock = DockStyle.Fill,
-            Text = "■",
-            Font = new Font("Segoe UI Semibold", 14F),
-            ForeColor = Accent,
-            TextAlign = ContentAlignment.MiddleCenter
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Image = File.Exists("logo_n.png") ? Image.FromFile("logo_n.png") : null
         };
         header.Controls.Add(logo, 0, 0);
 
         Label title = new()
         {
             Dock = DockStyle.Fill,
-            Text = "Ứng dụng truy xuất tài nguyên",
+            Text = "PeerLink",
             Font = new Font("Segoe UI Semibold", 18F),
             ForeColor = Ink,
             TextAlign = ContentAlignment.MiddleLeft
