@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using P2PFileSharingApp.Models;
 
@@ -61,6 +63,7 @@ public partial class MainForm : Form
     private ComboBox cboPeers = null!;
     private TextBox txtDisplayName = null!;
     private ComboBox cboServers = null!;
+    private bool isBindingDiscoveredServers;
     private NumericUpDown numPort = null!;
     
     private Button btnSavePeer = null!;
@@ -121,27 +124,169 @@ public partial class MainForm : Form
     private void BindDiscoveredServers(IReadOnlyList<DiscoveredServer> servers)
     {
         string? selectedServerId = (cboServers.SelectedItem as DiscoveredServer)?.ServerId;
+        string typedText = cboServers.Text;
+        bool keepTypedText = cboServers.Focused && cboServers.SelectedIndex < 0;
 
+        isBindingDiscoveredServers = true;
         cboServers.BeginUpdate();
-        cboServers.DataSource = servers.Count > 0 ? new List<DiscoveredServer>(servers) : null;
-        cboServers.DisplayMember = nameof(DiscoveredServer.DisplayName);
-        cboServers.EndUpdate();
-
-        if (servers.Count > 0)
+        try
         {
-            if (selectedServerId != null)
+            cboServers.Items.Clear();
+            foreach (DiscoveredServer server in servers)
+                cboServers.Items.Add(server);
+        }
+        finally
+        {
+            cboServers.EndUpdate();
+            isBindingDiscoveredServers = false;
+        }
+
+        if (keepTypedText)
+        {
+            cboServers.SelectedIndex = -1;
+            cboServers.Text = typedText;
+            cboServers.SelectionStart = cboServers.Text.Length;
+            return;
+        }
+
+        if (servers.Count == 0)
+        {
+            cboServers.SelectedIndex = -1;
+            cboServers.Text = typedText;
+            return;
+        }
+
+        if (selectedServerId != null)
+        {
+            for (int i = 0; i < cboServers.Items.Count; i++)
             {
-                for (int i = 0; i < servers.Count; i++)
+                if (cboServers.Items[i] is DiscoveredServer server && server.ServerId == selectedServerId)
                 {
-                    if (servers[i].ServerId == selectedServerId)
-                    {
-                        cboServers.SelectedIndex = i;
-                        return;
-                    }
+                    cboServers.SelectedIndex = i;
+                    return;
                 }
             }
-            cboServers.SelectedIndex = 0;
         }
+
+        if (!cboServers.Focused && string.IsNullOrWhiteSpace(typedText))
+            cboServers.SelectedIndex = 0;
+        else
+            cboServers.Text = typedText;
+    }
+
+    private static List<DiscoveredServer> MergeDiscoveredServers(
+        IEnumerable<DiscoveredServer> udpServers,
+        IEnumerable<DiscoveredServer> tcpServers)
+    {
+        Dictionary<string, DiscoveredServer> serversByEndpoint = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (DiscoveredServer server in tcpServers)
+            serversByEndpoint[server.Endpoint] = server;
+
+        foreach (DiscoveredServer server in udpServers)
+            serversByEndpoint[server.Endpoint] = server;
+
+        return serversByEndpoint.Values
+            .OrderBy(server => server.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(server => server.IpAddress, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static async Task<List<DiscoveredServer>> ScanLanByTcpAsync(int port, CancellationToken cancellationToken)
+    {
+        HashSet<string> targets = BuildLocalSubnetTargets();
+        List<Task<DiscoveredServer?>> scanTasks = [];
+        using SemaphoreSlim throttle = new(64);
+
+        foreach (string ip in targets)
+        {
+            scanTasks.Add(Task.Run(async () =>
+            {
+                await throttle.WaitAsync(cancellationToken);
+                try
+                {
+                    return await TryDiscoverServerByTcpAsync(ip, port, cancellationToken);
+                }
+                finally
+                {
+                    throttle.Release();
+                }
+            }, cancellationToken));
+        }
+
+        DiscoveredServer?[] results = await Task.WhenAll(scanTasks);
+        return results.Where(server => server is not null).Cast<DiscoveredServer>().ToList();
+    }
+
+    private static async Task<DiscoveredServer?> TryDiscoverServerByTcpAsync(
+        string ip,
+        int port,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using TcpClient client = new();
+            Task connectTask = client.ConnectAsync(ip, port);
+            Task timeoutTask = Task.Delay(300, cancellationToken);
+
+            if (await Task.WhenAny(connectTask, timeoutTask) != connectTask)
+                return null;
+
+            await connectTask;
+
+            if (!client.Connected)
+                return null;
+
+            return new DiscoveredServer
+            {
+                ServerId = $"tcp-{ip}-{port}",
+                DisplayName = $"P2P {ip}",
+                IpAddress = ip,
+                Port = port,
+                LastSeenUtc = DateTime.UtcNow
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static HashSet<string> BuildLocalSubnetTargets()
+    {
+        HashSet<string> targets = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> localIps = GetLocalIPv4Addresses();
+
+        foreach (string localIp in localIps)
+        {
+            string[] parts = localIp.Split('.');
+            if (parts.Length != 4)
+                continue;
+
+            string prefix = $"{parts[0]}.{parts[1]}.{parts[2]}.";
+            for (int host = 1; host <= 254; host++)
+            {
+                string candidate = prefix + host;
+                if (!localIps.Contains(candidate))
+                    targets.Add(candidate);
+            }
+        }
+
+        return targets;
+    }
+
+    private static HashSet<string> GetLocalIPv4Addresses()
+    {
+        return NetworkInterface.GetAllNetworkInterfaces()
+            .Where(nic =>
+                nic.OperationalStatus == OperationalStatus.Up &&
+                nic.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+            .SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
+            .Where(address =>
+                address.Address.AddressFamily == AddressFamily.InterNetwork &&
+                !IPAddress.IsLoopback(address.Address))
+            .Select(address => address.Address.ToString())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -549,11 +694,30 @@ public partial class MainForm : Form
         {
             btnScanLAN.Enabled = false;
             btnScanLAN.Text = "Đang quét...";
-            await _discoveryService.StopAsync();
-            _discoveryService.Start();
-            await Task.Delay(2000);
-            btnScanLAN.Text = "Quét LAN";
-            btnScanLAN.Enabled = true;
+            try
+            {
+                await _discoveryService.StopAsync();
+                _discoveryService.Start();
+                await Task.Delay(1500);
+
+                int port = (int)numPort.Value;
+                using CancellationTokenSource scanCts = new(TimeSpan.FromSeconds(4));
+                List<DiscoveredServer> tcpServers = await ScanLanByTcpAsync(port, scanCts.Token);
+                List<DiscoveredServer> udpServers = _discoveryService.Servers.ToList();
+                List<DiscoveredServer> mergedServers = MergeDiscoveredServers(udpServers, tcpServers);
+
+                BindDiscoveredServers(mergedServers);
+                AddClientLog($"Quét LAN xong: UDP {udpServers.Count}, TCP {tcpServers.Count}, tổng {mergedServers.Count} server.", LogType.Info);
+            }
+            catch (Exception ex)
+            {
+                AddClientLog("Quét LAN thất bại: " + ex.Message, LogType.Error);
+            }
+            finally
+            {
+                btnScanLAN.Text = "Quét LAN";
+                btnScanLAN.Enabled = true;
+            }
         };
         panel.Controls.Add(btnScanLAN, 5, 2);
 
@@ -1336,6 +1500,9 @@ public partial class MainForm : Form
 
     private void cboServers_SelectedIndexChanged(object? sender, EventArgs e)
     {
+        if (isBindingDiscoveredServers)
+            return;
+
         if (cboServers.SelectedItem is DiscoveredServer selectedServer)
         {
             txtDisplayName.Text = selectedServer.DisplayName;
@@ -1369,7 +1536,8 @@ public partial class MainForm : Form
     {
         peer = null;
         string ip = cboServers.Text.Trim(); 
-        if (cboServers.SelectedItem is DiscoveredServer srv) ip = srv.IpAddress;
+        if (cboServers.SelectedItem is DiscoveredServer srv && IsSelectedDiscoveredServerText(ip, srv))
+            ip = srv.IpAddress;
         string name = txtDisplayName.Text.Trim();
         int port = (int)numPort.Value;
 
@@ -1388,6 +1556,14 @@ public partial class MainForm : Form
             LastSeen = DateTime.Now
         };
         return true;
+    }
+
+    private static bool IsSelectedDiscoveredServerText(string text, DiscoveredServer server)
+    {
+        return string.Equals(text, server.ToString(), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(text, server.DisplayName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(text, server.Endpoint, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(text, server.IpAddress, StringComparison.OrdinalIgnoreCase);
     }
 
     public void UpsertDiscoveredPeer(PeerInfo discoveredPeer)
