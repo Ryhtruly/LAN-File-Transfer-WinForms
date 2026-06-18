@@ -80,47 +80,68 @@ public sealed class LanServerBroadcaster : IAsyncDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            var ipAddress = GetBestLocalIpv4Address();
-            if (ipAddress is not null)
-            {
-                var packet = new LanDiscoveryPacket
-                {
-                    ServerId = _serverId,
-                    DisplayName = _displayName,
-                    IpAddress = ipAddress,
-                    Port = _serverPort
-                };
+            var interfaces = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic =>
+                    nic.OperationalStatus == OperationalStatus.Up &&
+                    nic.NetworkInterfaceType != NetworkInterfaceType.Loopback);
 
-                var payload = Encoding.UTF8.GetBytes(LanDiscoveryPacket.Serialize(packet));
-                await _udpClient!.SendAsync(payload, payload.Length, new IPEndPoint(IPAddress.Broadcast, _discoveryPort))
-                    .ConfigureAwait(false);
+            foreach (var nic in interfaces)
+            {
+                foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+                {
+                    if (unicast.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(unicast.Address))
+                    {
+                        var packet = new LanDiscoveryPacket
+                        {
+                            ServerId = _serverId,
+                            DisplayName = _displayName,
+                            IpAddress = unicast.Address.ToString(),
+                            Port = _serverPort
+                        };
+
+                        var payload = Encoding.UTF8.GetBytes(LanDiscoveryPacket.Serialize(packet));
+
+                        // 1. Limited Broadcast (255.255.255.255)
+                        try
+                        {
+                            await _udpClient!.SendAsync(payload, payload.Length, new IPEndPoint(IPAddress.Broadcast, _discoveryPort))
+                                .ConfigureAwait(false);
+                        }
+                        catch { /* Bỏ qua lỗi định tuyến nếu có */ }
+
+                        // 2. Directed Broadcast (ví dụ: 192.168.1.255 hoặc 26.255.255.255 cho Radmin VPN)
+                        if (unicast.IPv4Mask != null)
+                        {
+                            try
+                            {
+                                var broadcastIp = GetBroadcastAddress(unicast.Address, unicast.IPv4Mask);
+                                await _udpClient!.SendAsync(payload, payload.Length, new IPEndPoint(broadcastIp, _discoveryPort))
+                                    .ConfigureAwait(false);
+                            }
+                            catch { /* Bỏ qua lỗi định tuyến */ }
+                        }
+                    }
+                }
             }
 
             await Task.Delay(_broadcastInterval, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private static string? GetBestLocalIpv4Address()
+    private static IPAddress GetBroadcastAddress(IPAddress address, IPAddress subnetMask)
     {
-        var interfaces = NetworkInterface.GetAllNetworkInterfaces()
-            .Where(nic =>
-                nic.OperationalStatus == OperationalStatus.Up &&
-                nic.NetworkInterfaceType != NetworkInterfaceType.Loopback);
+        byte[] ipAdressBytes = address.GetAddressBytes();
+        byte[] subnetMaskBytes = subnetMask.GetAddressBytes();
 
-        foreach (var networkInterface in interfaces)
+        if (ipAdressBytes.Length != subnetMaskBytes.Length)
+            return IPAddress.Broadcast;
+
+        byte[] broadcastAddress = new byte[ipAdressBytes.Length];
+        for (int i = 0; i < broadcastAddress.Length; i++)
         {
-            var address = networkInterface.GetIPProperties().UnicastAddresses
-                .FirstOrDefault(ip =>
-                    ip.Address.AddressFamily == AddressFamily.InterNetwork &&
-                    !IPAddress.IsLoopback(ip.Address));
-
-            if (address is not null)
-            {
-                return address.Address.ToString();
-            }
+            broadcastAddress[i] = (byte)(ipAdressBytes[i] | (subnetMaskBytes[i] ^ 255));
         }
-
-        return null;
+        return new IPAddress(broadcastAddress);
     }
 
     public async ValueTask DisposeAsync()
