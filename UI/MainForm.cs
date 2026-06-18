@@ -1910,36 +1910,57 @@ public partial class MainForm : Form
     {
         if (_client == null || !isConnected) return;
         
-        lvRemoteFiles.Items.Clear();
-        lvRemoteFiles.Items.Add(CreateFileItem("..", "Thư mục", "", DateTime.Now, ".."));
-        
         string response = await _client.GetListAsync(currentRemotePath);
-        var parts = response.Split('|');
-        if (parts.Length > 0 && parts[0] == P2PFileSharingApp.Network.ProtocolMessages.RES_LIST)
+        
+        if (InvokeRequired)
         {
-            for (int i = 1; i < parts.Length; i++)
-            {
-                string item = parts[i];
-                if (string.IsNullOrEmpty(item)) continue;
-                
-                if (item.StartsWith("[DIR]"))
-                {
-                    string name = item.Substring(5);
-                    lvRemoteFiles.Items.Add(CreateFileItem(name, "Thư mục", "", DateTime.Now, name));
-                }
-                else if (item.StartsWith("[FILE]"))
-                {
-                    string fileData = item.Substring(6);
-                    var fileParts = fileData.Split('*');
-                    string name = fileParts[0];
-                    long size = fileParts.Length > 1 && long.TryParse(fileParts[1], out long s) ? s : 0;
-                    lvRemoteFiles.Items.Add(CreateFileItem(name, "Tệp", FormatBytes(size), DateTime.Now, name));
-                }
-            }
+            Invoke(new Action(() => ProcessRemoteListResponse(response)));
         }
         else
         {
-            AddClientLog("Không thể tải danh sách file từ server.", LogType.Error);
+            ProcessRemoteListResponse(response);
+        }
+    }
+
+    private void ProcessRemoteListResponse(string response)
+    {
+        var parts = response.Split('|');
+        lvRemoteFiles.BeginUpdate();
+        try
+        {
+            lvRemoteFiles.Items.Clear();
+            lvRemoteFiles.Items.Add(CreateFileItem("..", "Thư mục", "", DateTime.Now, ".."));
+
+            if (parts.Length > 0 && parts[0] == P2PFileSharingApp.Network.ProtocolMessages.RES_LIST)
+            {
+                for (int i = 1; i < parts.Length; i++)
+                {
+                    string item = parts[i];
+                    if (string.IsNullOrEmpty(item)) continue;
+                    
+                    if (item.StartsWith("[DIR]"))
+                    {
+                        string name = item.Substring(5);
+                        lvRemoteFiles.Items.Add(CreateFileItem(name, "Thư mục", "", DateTime.Now, name));
+                    }
+                    else if (item.StartsWith("[FILE]"))
+                    {
+                        string fileData = item.Substring(6); // [FILE] is 6 chars long
+                        var fileParts = fileData.Split('*');
+                        string name = fileParts[0];
+                        long size = fileParts.Length > 1 && long.TryParse(fileParts[1], out long s) ? s : 0;
+                        lvRemoteFiles.Items.Add(CreateFileItem(name, "Tệp", FormatBytes(size), DateTime.Now, name));
+                    }
+                }
+            }
+            else
+            {
+                AddClientLog("Không thể tải danh sách file từ server.", LogType.Error);
+            }
+        }
+        finally
+        {
+            lvRemoteFiles.EndUpdate();
         }
     }
 
@@ -1974,7 +1995,11 @@ public partial class MainForm : Form
         if (ofd.ShowDialog() == DialogResult.OK)
         {
             foreach (var file in ofd.FileNames)
-                await _client.UploadAsync(file, currentRemotePath);
+            {
+                var res = await _client.UploadAsync(file, currentRemotePath);
+                if (res.ok) AddClientLog(res.msg, LogType.Success);
+                else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
+            }
             await ReloadRemoteFilesAsync();
         }
     }
@@ -1985,7 +2010,9 @@ public partial class MainForm : Form
         using FolderBrowserDialog fbd = new FolderBrowserDialog { Description = "Chọn thư mục để tải lên" };
         if (fbd.ShowDialog() == DialogResult.OK)
         {
-            await _client.UploadDirectoryAsync(fbd.SelectedPath, currentRemotePath);
+            var res = await _client.UploadDirectoryAsync(fbd.SelectedPath, currentRemotePath);
+            if (res.ok) AddClientLog(res.msg, LogType.Success);
+            else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
             await ReloadRemoteFilesAsync();
         }
     }
@@ -2139,7 +2166,7 @@ public partial class MainForm : Form
             }
             else
             {
-                AddClientLog($"Lỗi xóa '{fileName}': {res.msg}", LogType.Error);
+                AddClientLog($"Lỗi xóa file: {res.msg}", LogType.Error);
             }
         }
     }
@@ -2177,15 +2204,11 @@ public partial class MainForm : Form
     private void UpdateActionState()
     {
         bool hasSelection = lvRemoteFiles.SelectedItems.Count > 0;
-        
-        bool canUpload = remotePermission == "UploadOnly" || remotePermission == "ReadWrite" || remotePermission == "FullAccess";
-        bool canDownload = remotePermission == "ReadOnly" || remotePermission == "ReadWrite" || remotePermission == "FullAccess";
-        bool canEdit = remotePermission == "FullAccess";
 
-        btnUpload.Enabled = isConnected && canUpload;
-        btnDownload.Enabled = isConnected && hasSelection && canDownload;
-        btnDelete.Enabled = isConnected && hasSelection && canEdit;
-        btnRenameRemoteFile.Enabled = isConnected && lvRemoteFiles.SelectedItems.Count == 1 && canEdit;
+        btnUpload.Enabled = isConnected;
+        btnDownload.Enabled = isConnected && hasSelection;
+        btnDelete.Enabled = isConnected && hasSelection;
+        btnRenameRemoteFile.Enabled = isConnected && lvRemoteFiles.SelectedItems.Count == 1;
         btnReloadRemote.Enabled = isConnected;
     }
 
@@ -2215,11 +2238,15 @@ public partial class MainForm : Form
         {
             if (Directory.Exists(path))
             {
-                await _client.UploadDirectoryAsync(path, currentRemotePath);
+                var res = await _client.UploadDirectoryAsync(path, currentRemotePath);
+                if (res.ok) AddClientLog(res.msg, LogType.Success);
+                else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
             }
             else if (File.Exists(path))
             {
-                await _client.UploadAsync(path, currentRemotePath);
+                var res = await _client.UploadAsync(path, currentRemotePath);
+                if (res.ok) AddClientLog(res.msg, LogType.Success);
+                else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
             }
         }
         await ReloadRemoteFilesAsync();

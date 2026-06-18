@@ -260,7 +260,7 @@ namespace P2PFileSharingApp.Core
         /// Áp dụng: Fault Tolerance + Stream-oriented communication
         /// RAM = 8KB dù file bao lớn.
         /// </summary>
-        public static async Task<bool> ReadFileStreamAsync(
+        public static bool ReadFileStream(
             string filePath,
             Func<Stream> getNetworkStream,  // Lấy NetworkStream để ghi dữ liệu
             Action<long, long>? onProgress = null)  // (bytesSent, totalBytes)
@@ -283,7 +283,7 @@ namespace P2PFileSharingApp.Core
                     int bytesRead;
                     while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
                     {
-                        await networkStream.WriteAsync(buffer, 0, bytesRead);
+                        networkStream.Write(buffer, 0, bytesRead);
                         bytesSent += bytesRead;
                         onProgress?.Invoke(bytesSent, totalSize);
                     }
@@ -302,7 +302,7 @@ namespace P2PFileSharingApp.Core
         /// Áp dụng: Fault Tolerance + Stream-oriented communication
         /// RAM = 8KB dù file bao lớn.
         /// </summary>
-        public static async Task<(bool Ok, bool WasLocked)> WriteFileStreamAsync(
+        public static (bool Ok, bool WasLocked) WriteFileStream(
             string filePath,
             Func<Stream> getNetworkStream,  // Lấy NetworkStream để đọc dữ liệu
             long fileSize,
@@ -332,7 +332,7 @@ namespace P2PFileSharingApp.Core
                     while (bytesReceived < fileSize)
                     {
                         int toRead = (int)Math.Min(buffer.Length, fileSize - bytesReceived);
-                        int bytesRead = await networkStream.ReadAsync(buffer, 0, toRead);
+                        int bytesRead = networkStream.Read(buffer, 0, toRead);
 
                         if (bytesRead == 0) break;
 

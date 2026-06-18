@@ -322,7 +322,7 @@ namespace P2PFileSharingApp.Network
                     Directory.CreateDirectory(dir);
 
                 // Ghi file theo dạng Stream
-                var result = FileManager.WriteFileStreamAsync(
+                var result = FileManager.WriteFileStream(
                     fullPath,
                     () => stream,
                     fileSize,
@@ -333,7 +333,7 @@ namespace P2PFileSharingApp.Network
                             int percent = (int)((bytesReceived * 100) / total);
                             Log($"📥 {relativePath} | {percent}% | {bytesReceived / (1024.0 * 1024.0):F1}MB / {total / (1024.0 * 1024.0):F1}MB");
                         }
-                    }).GetAwaiter().GetResult();
+                    });
 
                 if (result.WasLocked)
                 {
