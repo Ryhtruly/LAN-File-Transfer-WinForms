@@ -34,7 +34,7 @@ public partial class MainForm : Form
     private P2PClient? _client;
     private LanServerBroadcaster? _serverBroadcaster;
     private FileSystemWatcher? _serverWatcher;
-    private string P2PSharedRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "P2PSharedRoot");
+    private string P2PSharedRoot = P2PFileSharingApp.Core.SettingsManager.Current.DefaultDownloadPath;
     private readonly ToolTip toolTips = new();
     private readonly ImageList fileIcons = new();
 
@@ -746,7 +746,7 @@ public partial class MainForm : Form
         panel.SetColumnSpan(title, 5);
 
         panel.Controls.Add(FieldLabel("Hồ sơ hiển thị:"), 5, 0);
-        txtMyProfileName = new TextBox { Dock = DockStyle.Fill, Text = "Máy của tôi" };
+        txtMyProfileName = new TextBox { Dock = DockStyle.Fill, Text = P2PFileSharingApp.Core.SettingsManager.Current.DisplayName };
         panel.Controls.Add(txtMyProfileName, 6, 0);
         panel.SetColumnSpan(txtMyProfileName, 2);
 
@@ -1809,9 +1809,14 @@ public partial class MainForm : Form
             _client = new P2PClient();
             _client.OnLog += msg => AddClientLog(msg, LogType.Info);
             
-            _client.MyDisplayName = string.IsNullOrWhiteSpace(txtMyProfileName.Text)
+            string newName = string.IsNullOrWhiteSpace(txtMyProfileName.Text)
                 ? "M\u00e1y kh\u00e1ch"
                 : txtMyProfileName.Text.Trim();
+            _client.MyDisplayName = newName;
+            
+            // Save to settings
+            P2PFileSharingApp.Core.SettingsManager.Current.DisplayName = newName;
+            P2PFileSharingApp.Core.SettingsManager.Save();
             
             var res = await _client.ConnectAsync(peer.IpAddress, peer.Port);
             if (!res.ok) throw new Exception(res.message);
@@ -2100,21 +2105,33 @@ public partial class MainForm : Form
             return;
         }
 
+        using var fbd = new FolderBrowserDialog
+        {
+            Description = "Chọn thư mục để lưu các file tải về",
+            UseDescriptionForTitle = true,
+            SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "\\Downloads"
+        };
+        
+        if (fbd.ShowDialog() != DialogResult.OK)
+        {
+            return;
+        }
+        
+        string downloadRoot = fbd.SelectedPath;
+
         SetTransferRunning(true);
         transferCts = new CancellationTokenSource();
         Progress<TransferProgress> progress = new(UpdateTransferProgress);
 
         try
         {
-            Directory.CreateDirectory(localRoot);
-
             foreach (ListViewItem item in files)
             {
                 long bytes = ParseDisplaySize(item.SubItems[2].Text);
                 string safeFileName = SanitizeFileName(item.Text);
-                string destinationPath = GetUniqueDownloadPath(Path.Combine(localRoot, safeFileName));
+                string destinationPath = GetUniqueDownloadPath(Path.Combine(downloadRoot, safeFileName));
 
-                AddClientLog($"Bắt đầu tải về: {item.Text} → {localRoot}", LogType.Info);
+                AddClientLog($"Bắt đầu tải về: {item.Text} → {downloadRoot}", LogType.Info);
                 var res = await _client!.DownloadAsync(item.Text, Path.GetDirectoryName(destinationPath)!, progress, transferCts.Token);
                 if (res.ok)
                     AddClientLog("Tải về thành công: " + destinationPath, LogType.Success);
