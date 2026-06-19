@@ -82,10 +82,10 @@ public class SplashForm : Form
         Label lblName = new Label { Text = "Tên hiển thị:", Font = new Font("Segoe UI", 11F), ForeColor = Color.FromArgb(100, 116, 139), AutoSize = true, Location = new Point(60, 50) };
         onboardingPanel.Controls.Add(lblName);
 
-        txtName = new TextBox { Bounds = new Rectangle(180, 47, 430, 30), Font = new Font("Segoe UI", 11.5F), Text = SettingsManager.Current.DisplayName };
+        txtName = new TextBox { Bounds = new Rectangle(200, 47, 410, 30), Font = new Font("Segoe UI", 11.5F), Text = SettingsManager.Current.DisplayName };
         onboardingPanel.Controls.Add(txtName);
 
-        Label lblPath = new Label { Text = "Thư mục chia sẻ:", Font = new Font("Segoe UI", 11F), ForeColor = Color.FromArgb(100, 116, 139), AutoSize = true, Location = new Point(60, 95) };
+        Label lblPath = new Label { Text = "Thư mục:", Font = new Font("Segoe UI", 11F), ForeColor = Color.FromArgb(100, 116, 139), AutoSize = true, Location = new Point(60, 95) };
         onboardingPanel.Controls.Add(lblPath);
 
         string defaultPath = SettingsManager.Current.DefaultDownloadPath;
@@ -94,7 +94,7 @@ public class SplashForm : Form
             defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "PeerLink");
         }
 
-        txtPath = new TextBox { Bounds = new Rectangle(180, 92, 330, 30), Font = new Font("Segoe UI", 11.5F), Text = defaultPath };
+        txtPath = new TextBox { Bounds = new Rectangle(200, 92, 310, 30), Font = new Font("Segoe UI", 11.5F), Text = defaultPath };
         onboardingPanel.Controls.Add(txtPath);
 
         SplashRoundedButton btnBrowse = new SplashRoundedButton { Text = "Chọn...", Bounds = new Rectangle(520, 90, 90, 32), Font = new Font("Segoe UI", 10F), BackColor = Color.FromArgb(226, 232, 240), ForeColor = Color.FromArgb(31, 41, 55) };

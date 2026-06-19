@@ -672,6 +672,14 @@ public partial class MainForm : Form
             cboPermissionIp.Items.Clear();
             foreach(var ip in _server.ConnectedClientIPs) cboPermissionIp.Items.Add(ip);
         };
+        cboPermissionIp.SelectedIndexChanged += (_, _) => {
+            string ip = cboPermissionIp.Text.Trim();
+            var existing = lvPermissions.Items.Cast<ListViewItem>().FirstOrDefault(i => i.Text == ip);
+            if (existing != null) {
+                cboPermissionMode.SelectedItem = existing.SubItems[1].Text;
+                txtPermissionName.Text = existing.SubItems[2].Text;
+            }
+        };
         editor.Controls.Add(cboPermissionIp, 0, 0);
         txtPermissionName = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "Tên hiển thị" };
         editor.Controls.Add(txtPermissionName, 1, 0);
@@ -1465,8 +1473,8 @@ public partial class MainForm : Form
                 int port = 8888;
                 _server.Start(port);
                 
-                string displayName = "Server của tôi";
-                if (System.Net.Dns.GetHostName() is string host) displayName = $"Máy {host}";
+                string displayName = P2PFileSharingApp.Core.SettingsManager.Current.DisplayName;
+                if (string.IsNullOrWhiteSpace(displayName)) displayName = $"Máy {System.Net.Dns.GetHostName()}";
                 
                 _serverBroadcaster = new LanServerBroadcaster(displayName, port);
                 _serverBroadcaster.Start();
@@ -1823,7 +1831,7 @@ public partial class MainForm : Form
 
             isConnected = true;
             remotePermission = res.permission;
-            lblConnection.Text = $"Đã kết nối ({remotePermission})";
+            lblConnection.Text = "Đã kết nối";
             lblConnection.ForeColor = Success;
             lblConnection.BackColor = SuccessSoft;
             AddClientLog($"Đã kết nối thành công tới {peer.IpAddress}:{peer.Port}", LogType.Success);
