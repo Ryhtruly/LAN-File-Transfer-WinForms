@@ -40,11 +40,21 @@ namespace P2PFileSharingApp.Network
                 // Đọc câu chào từ Server để lấy phân quyền
                 string? welcome = await _reader.ReadLineAsync();
                 string permission = "ReadOnly"; // mặc định
-                if (welcome != null && welcome.StartsWith(ProtocolMessages.RES_OK))
+                if (welcome != null)
                 {
-                    var parts = welcome.Split('|');
-                    if (parts.Length > 1)
-                        permission = parts[1];
+                    if (welcome.StartsWith(ProtocolMessages.RES_DENIED))
+                    {
+                        var parts = welcome.Split('|');
+                        string rejectMsg = parts.Length > 1 ? parts[1] : "Bị từ chối.";
+                        Log($"❌ Kết nối bị từ chối: {rejectMsg}");
+                        return (false, rejectMsg, "ReadOnly");
+                    }
+                    else if (welcome.StartsWith(ProtocolMessages.RES_OK))
+                    {
+                        var parts = welcome.Split('|');
+                        if (parts.Length > 1)
+                            permission = parts[1];
+                    }
                 }
 
                 Log($"✅ Kết nối thành công tới {ip}:{port} (Quyền: {permission})");

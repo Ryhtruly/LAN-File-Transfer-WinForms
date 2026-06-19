@@ -452,20 +452,21 @@ public partial class MainForm : Form
 
     private static Button NavButton(string text)
     {
-        Button button = new()
+        var button = new RoundedButton(8)
         {
             Text = text,
             AutoSize = false,
             Width = 172,
             Height = 30,
             Margin = new Padding(0, 0, 10, 0),
-            FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI Semibold", 9.5F),
-            Cursor = Cursors.Hand
+            Cursor = Cursors.Hand,
+            BackColor = Color.White,
+            ForeColor = Ink,
+            BorderColor = Color.FromArgb(205, 214, 224),
+            HoverBackColor = AccentSoft,
+            PressedBackColor = Color.FromArgb(190, 226, 220)
         };
-        button.FlatAppearance.BorderColor = Color.FromArgb(205, 214, 224);
-        button.FlatAppearance.MouseOverBackColor = AccentSoft;
-        button.FlatAppearance.MouseDownBackColor = Color.FromArgb(190, 226, 220);
         return button;
     }
 
@@ -633,7 +634,7 @@ public partial class MainForm : Form
         panel.Controls.Add(SectionTitle("Phân quyền IP"), 0, 0);
         panel.Controls.Add(BuildPermissionEditor(), 0, 1);
 
-        lvPermissions = new ListView
+        lvPermissions = new DoubleBufferedListView
         {
             Dock = DockStyle.Fill,
             View = View.Details,
@@ -762,7 +763,7 @@ public partial class MainForm : Form
         cboPeers.SelectedIndexChanged += (_, _) => FillSelectedPeer();
         panel.Controls.Add(cboPeers, 0, 2);
 
-        txtDisplayName = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "Phòng của Hải" };
+        txtDisplayName = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "VD: Máy của Nam" };
         panel.Controls.Add(txtDisplayName, 1, 2);
 
         cboServers = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDown };
@@ -966,7 +967,7 @@ public partial class MainForm : Form
 
     private static TableLayoutPanel CreatePanel(int columns, int rows)
     {
-        TableLayoutPanel panel = new()
+        TableLayoutPanel panel = new RoundedPanel(10)
         {
             Dock = DockStyle.Fill,
             ColumnCount = columns,
@@ -1004,12 +1005,12 @@ public partial class MainForm : Form
 
     private static Label StatusLabel(string text, Color color, Color backColor)
     {
-        return new Label
+        return new RoundedLabel(6)
         {
             Dock = DockStyle.Fill,
             Text = text,
             ForeColor = color,
-            BackColor = backColor,
+            FillColor = backColor,
             Font = new Font("Segoe UI Semibold", 9.5F),
             TextAlign = ContentAlignment.MiddleCenter
         };
@@ -1052,42 +1053,20 @@ public partial class MainForm : Form
     {
         private bool hovered;
         private bool pressed;
+        private const int Radius = 8;
 
         public CenteredIconButton()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
             FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
             TabStop = true;
         }
 
-        protected override void OnMouseEnter(EventArgs e)
-        {
-            hovered = true;
-            Invalidate();
-            base.OnMouseEnter(e);
-        }
-
-        protected override void OnMouseLeave(EventArgs e)
-        {
-            hovered = false;
-            pressed = false;
-            Invalidate();
-            base.OnMouseLeave(e);
-        }
-
-        protected override void OnMouseDown(MouseEventArgs mevent)
-        {
-            pressed = true;
-            Invalidate();
-            base.OnMouseDown(mevent);
-        }
-
-        protected override void OnMouseUp(MouseEventArgs mevent)
-        {
-            pressed = false;
-            Invalidate();
-            base.OnMouseUp(mevent);
-        }
+        protected override void OnMouseEnter(EventArgs e) { hovered = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hovered = false; pressed = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(MouseEventArgs mevent) { pressed = true; Invalidate(); base.OnMouseDown(mevent); }
+        protected override void OnMouseUp(MouseEventArgs mevent) { pressed = false; Invalidate(); base.OnMouseUp(mevent); }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -1096,12 +1075,16 @@ public partial class MainForm : Form
                 : hovered ? Color.FromArgb(217, 230, 237) : BackColor;
 
             e.Graphics.Clear(Parent?.BackColor ?? SystemColors.Control);
-            using SolidBrush brush = new(fill);
-            using Pen border = new(Color.FromArgb(190, 201, 212));
-            Rectangle rect = new(0, 0, Width - 1, Height - 1);
-            e.Graphics.FillRectangle(brush, rect);
-            e.Graphics.DrawRectangle(border, rect);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
+            Rectangle rect = new(0, 0, Width - 1, Height - 1);
+            using GraphicsPath path = RoundedRect(rect, Radius);
+            using SolidBrush brush = new(fill);
+            e.Graphics.FillPath(brush, path);
+            using Pen border = new(Color.FromArgb(190, 201, 212));
+            e.Graphics.DrawPath(border, path);
+
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             using SolidBrush textBrush = new(ForeColor);
             using StringFormat format = new()
             {
@@ -1109,11 +1092,7 @@ public partial class MainForm : Form
                 LineAlignment = StringAlignment.Center,
                 FormatFlags = StringFormatFlags.NoClip
             };
-            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             e.Graphics.DrawString(Text, Font, textBrush, ClientRectangle, format);
-
-            if (Focused)
-                ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(ClientRectangle, -4, -4));
         }
     }
 
@@ -1187,16 +1166,18 @@ public partial class MainForm : Form
             int height = Math.Min(9, Math.Max(6, Height - 4));
             Rectangle track = new(0, (Height - height) / 2, Width, height);
 
+            using GraphicsPath trackPath = RoundedRect(track, height / 2);
             using SolidBrush trackBrush = new(Color.FromArgb(226, 232, 240));
-            e.Graphics.FillRectangle(trackBrush, track);
+            e.Graphics.FillPath(trackBrush, trackPath);
 
             if (Maximum <= 0 || value <= 0)
                 return;
 
             int fillWidth = Math.Max(1, (int)Math.Round(track.Width * (value / (double)Maximum)));
             Rectangle fill = new(track.X, track.Y, Math.Min(fillWidth, track.Width), track.Height);
+            using GraphicsPath fillPath = RoundedRect(fill, height / 2);
             using SolidBrush fillBrush = new(Accent);
-            e.Graphics.FillRectangle(fillBrush, fill);
+            e.Graphics.FillPath(fillBrush, fillPath);
         }
     }
 
@@ -1224,22 +1205,24 @@ public partial class MainForm : Form
         };
         listView.DrawItem += (_, e) =>
         {
-            if (e.Item == null)
-                return;
-
-            Color fillColor = PanelBack;
-            if (e.Item.Selected)
-                fillColor = Color.FromArgb(224, 238, 241);
-            else if (e.Item.BackColor != Color.Empty && e.Item.BackColor != PanelBack)
-                fillColor = e.Item.BackColor;
-
-            using SolidBrush rowBrush = new(fillColor);
-            e.Graphics.FillRectangle(rowBrush, e.Bounds);
+            // Do NOT draw anything here for Details view.
+            // DrawSubItem handles everything including column 0.
         };
         listView.DrawSubItem += (_, e) =>
         {
             if (e.Item == null || e.SubItem == null)
                 return;
+
+            // Determine background color for this cell
+            Color fillColor = PanelBack;
+            if (e.Item.Selected)
+                fillColor = Color.FromArgb(224, 238, 241);
+            else if (e.Item.Tag is string tag && tag == "hover")
+                fillColor = Color.FromArgb(238, 244, 247);
+
+            // Fill the entire cell background first
+            using (SolidBrush rowBrush = new(fillColor))
+                e.Graphics.FillRectangle(rowBrush, e.Bounds);
 
             Color textColor = e.Item.Selected ? Ink : e.SubItem.ForeColor;
             if (textColor == Color.Empty)
@@ -1267,24 +1250,23 @@ public partial class MainForm : Form
 
     private static Button BaseButton(string text)
     {
-        Button button = new()
+        var button = new RoundedButton(8)
         {
             Dock = DockStyle.Fill,
             Text = text,
-            FlatStyle = FlatStyle.Flat,
             Font = new Font("Segoe UI Semibold", 9.25F),
             Margin = new Padding(5, 3, 5, 3),
-            Cursor = Cursors.Hand
+            Cursor = Cursors.Hand,
+            BorderColor = Color.FromArgb(190, 201, 212),
+            HoverBackColor = Color.FromArgb(217, 230, 237),
+            PressedBackColor = Color.FromArgb(197, 215, 224)
         };
-        button.FlatAppearance.BorderColor = Color.FromArgb(190, 201, 212);
-        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(217, 230, 237);
-        button.FlatAppearance.MouseDownBackColor = Color.FromArgb(197, 215, 224);
         return button;
     }
 
     private ListView CreateFileListView()
     {
-        ListView listView = new()
+        ListView listView = new DoubleBufferedListView()
         {
             Dock = DockStyle.Fill,
             View = View.Details,
@@ -1305,17 +1287,26 @@ public partial class MainForm : Form
                 return;
 
             if (listView.Tag is ListViewItem previous)
-                previous.BackColor = PanelBack;
+            {
+                previous.Tag = null;
+                listView.Invalidate(previous.Bounds);
+            }
 
             if (current != null)
-                current.BackColor = Color.FromArgb(238, 244, 247);
+            {
+                current.Tag = "hover";
+                listView.Invalidate(current.Bounds);
+            }
 
             listView.Tag = current;
         };
         listView.MouseLeave += (_, _) =>
         {
             if (listView.Tag is ListViewItem previous)
-                previous.BackColor = PanelBack;
+            {
+                previous.Tag = null;
+                listView.Invalidate(previous.Bounds);
+            }
             listView.Tag = null;
         };
         listView.Columns.Add("Tên", 280);
@@ -1329,7 +1320,7 @@ public partial class MainForm : Form
 
     private static ListView CreateLogListView()
     {
-        ListView listView = new()
+        ListView listView = new DoubleBufferedListView()
         {
             Dock = DockStyle.Fill,
             View = View.Details,
@@ -1584,35 +1575,41 @@ public partial class MainForm : Form
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MinimizeBox = false,
             MaximizeBox = false,
-            ClientSize = new Size(360, 200),
-            Font = Font
+            ClientSize = new Size(380, 220),
+            Font = Font,
+            BackColor = PanelBack
         };
 
         Label message = new()
         {
-            Bounds = new Rectangle(15, 15, 330, 30),
-            Text = $"Máy {displayName} ({ip}) muốn kết nối tới server.",
+            Location = new Point(20, 15),
+            MaximumSize = new Size(340, 0),
+            AutoSize = true,
+            Text = $"Máy {displayName}\n({ip}) đang yêu cầu kết nối.",
             ForeColor = Ink,
-            TextAlign = ContentAlignment.MiddleLeft
+            Font = new Font("Segoe UI Semibold", 10.5F),
+            TextAlign = ContentAlignment.TopLeft
         };
         dialog.Controls.Add(message);
 
-        dialog.Controls.Add(new Label { Text = "Tên hiển thị", Bounds = new Rectangle(15, 50, 90, 25), TextAlign = ContentAlignment.MiddleLeft });
-        TextBox txtName = new() { Bounds = new Rectangle(105, 50, 230, 25), Text = displayName };
+        dialog.Controls.Add(new Label { Text = "Tên hiển thị:", Location = new Point(20, 78), AutoSize = true, ForeColor = Muted });
+        TextBox txtName = new() { Bounds = new Rectangle(110, 75, 240, 25), Text = displayName };
         dialog.Controls.Add(txtName);
 
-        dialog.Controls.Add(new Label { Text = "Quyền", Bounds = new Rectangle(15, 90, 90, 25), TextAlign = ContentAlignment.MiddleLeft });
-        ComboBox cboMode = new() { Bounds = new Rectangle(105, 90, 230, 25), DropDownStyle = ComboBoxStyle.DropDownList };
+        dialog.Controls.Add(new Label { Text = "Quyền hạn:", Location = new Point(20, 118), AutoSize = true, ForeColor = Muted });
+        ComboBox cboMode = new() { Bounds = new Rectangle(110, 115, 240, 25), DropDownStyle = ComboBoxStyle.DropDownList };
         cboMode.Items.AddRange(["Chỉ tải về", "Chỉ tải lên", "Tải lên và tải về", "Toàn quyền"]);
         cboMode.SelectedIndex = 0;
         dialog.Controls.Add(cboMode);
 
-        Button allow = PrimaryButton("OK");
-        allow.Bounds = new Rectangle(245, 140, 90, 35);
+        Button allow = PrimaryButton("Chấp nhận");
+        allow.Dock = DockStyle.None;
+        allow.Bounds = new Rectangle(230, 165, 120, 35);
         allow.DialogResult = DialogResult.OK;
         
         Button deny = SecondaryButton("Từ chối");
-        deny.Bounds = new Rectangle(145, 140, 90, 35);
+        deny.Dock = DockStyle.None;
+        deny.Bounds = new Rectangle(100, 165, 120, 35);
         deny.DialogResult = DialogResult.Cancel;
 
         dialog.Controls.Add(allow);
@@ -1811,6 +1808,10 @@ public partial class MainForm : Form
             _client?.Disconnect();
             _client = new P2PClient();
             _client.OnLog += msg => AddClientLog(msg, LogType.Info);
+            
+            _client.MyDisplayName = string.IsNullOrWhiteSpace(txtMyProfileName.Text)
+                ? "M\u00e1y kh\u00e1ch"
+                : txtMyProfileName.Text.Trim();
             
             var res = await _client.ConnectAsync(peer.IpAddress, peer.Port);
             if (!res.ok) throw new Exception(res.message);
@@ -2426,5 +2427,133 @@ public partial class MainForm : Form
         path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
         return path;
+    }
+
+    // ═══════════════ ROUNDED BUTTON ═══════════════
+    private sealed class RoundedButton : Button
+    {
+        private bool hovered;
+        private bool pressed;
+        private readonly int radius;
+
+        public Color BorderColor { get; set; } = Color.FromArgb(190, 201, 212);
+        public Color HoverBackColor { get; set; } = Color.FromArgb(217, 230, 237);
+        public Color PressedBackColor { get; set; } = Color.FromArgb(197, 215, 224);
+
+        public RoundedButton(int radius = 8)
+        {
+            this.radius = radius;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            TabStop = true;
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { hovered = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hovered = false; pressed = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(MouseEventArgs mevent) { pressed = true; Invalidate(); base.OnMouseDown(mevent); }
+        protected override void OnMouseUp(MouseEventArgs mevent) { pressed = false; Invalidate(); base.OnMouseUp(mevent); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Color fill = pressed ? PressedBackColor
+                       : hovered ? HoverBackColor
+                       : BackColor;
+
+            e.Graphics.Clear(Parent?.BackColor ?? SystemColors.Control);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            Rectangle rect = new(0, 0, Width - 1, Height - 1);
+            using GraphicsPath path = RoundedRect(rect, radius);
+            using SolidBrush brush = new(fill);
+            e.Graphics.FillPath(brush, path);
+            using Pen border = new(BorderColor);
+            e.Graphics.DrawPath(border, path);
+
+            using SolidBrush textBrush = new(ForeColor);
+            using StringFormat format = new()
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center
+            };
+            e.Graphics.DrawString(Text, Font, textBrush, ClientRectangle, format);
+        }
+    }
+
+    // ═══════════════ ROUNDED PANEL ═══════════════
+    private sealed class RoundedPanel : TableLayoutPanel
+    {
+        private readonly int radius;
+
+        public RoundedPanel(int radius = 10)
+        {
+            this.radius = radius;
+            DoubleBuffered = true;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            Rectangle rect = new(0, 0, Width - 1, Height - 1);
+            using GraphicsPath path = RoundedRect(rect, radius);
+            using SolidBrush brush = new(BackColor);
+            e.Graphics.FillPath(brush, path);
+            using Pen border = new(Color.FromArgb(226, 232, 240));
+            e.Graphics.DrawPath(border, path);
+        }
+
+        protected override void OnResize(EventArgs eventargs)
+        {
+            base.OnResize(eventargs);
+            using GraphicsPath path = RoundedRect(new Rectangle(0, 0, Width, Height), radius);
+            Region = new Region(path);
+        }
+    }
+
+    // ═══════════════ ROUNDED LABEL ═══════════════
+    private sealed class RoundedLabel : Label
+    {
+        private readonly int radius;
+        public Color FillColor { get; set; } = NeutralBadge;
+
+        public RoundedLabel(int radius = 6)
+        {
+            this.radius = radius;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.Clear(Parent?.BackColor ?? SystemColors.Control);
+
+            Rectangle rect = new(0, 0, Width - 1, Height - 1);
+            using GraphicsPath path = RoundedRect(rect, radius);
+            using SolidBrush brush = new(FillColor);
+            e.Graphics.FillPath(brush, path);
+
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            using SolidBrush textBrush = new(ForeColor);
+            using StringFormat format = new()
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center
+            };
+            e.Graphics.DrawString(Text, Font, textBrush, ClientRectangle, format);
+        }
+    }
+
+    // ═══════════════ DOUBLE BUFFERED LISTVIEW ═══════════════
+    private sealed class DoubleBufferedListView : ListView
+    {
+        public DoubleBufferedListView()
+        {
+            DoubleBuffered = true;
+            SetStyle(
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.AllPaintingInWmPaint,
+                true);
+        }
     }
 }
