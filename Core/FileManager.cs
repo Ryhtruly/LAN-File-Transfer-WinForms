@@ -306,6 +306,7 @@ namespace P2PFileSharingApp.Core
             string filePath,
             Func<Stream> getNetworkStream,  // Lấy NetworkStream để đọc dữ liệu
             long fileSize,
+            long offset = 0,
             Action<long, long>? onProgress = null)  // (bytesReceived, totalBytes)
         {
             var lk = GetLock(filePath);
@@ -315,6 +316,8 @@ namespace P2PFileSharingApp.Core
                 return (false, true);
             }
 
+            string tmpFilePath = filePath + ".tmp";
+            bool success = false;
             try
             {
                 // Tạo directory nếu chưa có
@@ -322,13 +325,18 @@ namespace P2PFileSharingApp.Core
                 if (dir != null && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                long bytesReceived = 0;
+                long bytesReceived = offset;
                 const int BUFFER_SIZE = 8192;
                 byte[] buffer = new byte[BUFFER_SIZE];
 
                 var networkStream = getNetworkStream();
-                using (var fs = File.Create(filePath))
+                using (var fs = offset > 0 ? File.Open(tmpFilePath, FileMode.OpenOrCreate, FileAccess.Write) : File.Create(tmpFilePath))
                 {
+                    if (offset > 0)
+                    {
+                        fs.Seek(offset, SeekOrigin.Begin);
+                    }
+
                     while (bytesReceived < fileSize)
                     {
                         int toRead = (int)Math.Min(buffer.Length, fileSize - bytesReceived);
@@ -342,7 +350,17 @@ namespace P2PFileSharingApp.Core
                     }
                 }
 
-                return (bytesReceived == fileSize, false);
+                if (bytesReceived == fileSize)
+                {
+                    if (File.Exists(filePath))
+                    {
+                        File.Delete(filePath);
+                    }
+                    File.Move(tmpFilePath, filePath);
+                    success = true;
+                }
+
+                return (success, false);
             }
             catch { return (false, false); }
             finally { lk.ExitWriteLock(); }

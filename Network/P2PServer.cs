@@ -216,7 +216,12 @@ namespace P2PFileSharingApp.Network
                     if (!PermissionManager.CanDownload(clientIP))
                     { writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Bạn không có quyền tải file."); break; }
                     if (parts.Length < 2) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Thiếu tên file."); break; }
-                    HandleDownload(parts[1], stream, writer);
+                    long downloadOffset = 0;
+                    if (parts.Length > 2 && long.TryParse(parts[2], out long parsedOffset))
+                    {
+                        downloadOffset = parsedOffset;
+                    }
+                    HandleDownload(parts[1], downloadOffset, stream, writer);
                     break;
 
                 // ── UPLOAD (yêu cầu Write) ──
@@ -259,7 +264,7 @@ namespace P2PFileSharingApp.Network
 
         // ─────────────────── HANDLERS ───────────────────
 
-        private void HandleDownload(string relativePath, NetworkStream stream, StreamWriter writer)
+        private void HandleDownload(string relativePath, long offset, NetworkStream stream, StreamWriter writer)
         {
             string? fullPath = FileManager.GetSafePath(SharedFolderPath, relativePath);
             if (fullPath == null) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Đường dẫn không hợp lệ."); return; }
@@ -273,14 +278,23 @@ namespace P2PFileSharingApp.Network
             var fi = new FileInfo(fullPath);
             writer.WriteLine($"{ProtocolMessages.RES_OK}|{fi.Length}");
 
+            // Set dynamic timeout
+            stream.ReadTimeout = 15000;
+            stream.WriteTimeout = 15000;
+
             try
             {
                 // Stream file in 8KB chunks (Fault Tolerance strategy)
                 using (var fs = File.OpenRead(fullPath))
                 {
+                    if (offset > 0)
+                    {
+                        fs.Seek(offset, SeekOrigin.Begin);
+                    }
+
                     byte[] buffer = new byte[8192];
                     int bytesRead;
-                    long totalSent = 0;
+                    long totalSent = offset;
                     var sw = System.Diagnostics.Stopwatch.StartNew();
 
                     while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
@@ -292,7 +306,7 @@ namespace P2PFileSharingApp.Network
                         if (totalSent % (1024 * 1024) == 0 || fs.Position == fs.Length)
                         {
                             int percent = (int)((totalSent * 100) / fi.Length);
-                            double mbps = (totalSent / (1024.0 * 1024.0)) / sw.Elapsed.TotalSeconds;
+                            double mbps = ((totalSent - offset) / (1024.0 * 1024.0)) / sw.Elapsed.TotalSeconds;
                             Log($"📤 {relativePath} | {percent}% | {totalSent / (1024.0 * 1024.0):F1}MB / {fi.Length / (1024.0 * 1024.0):F1}MB | {mbps:F2}MB/s");
                         }
                     }
@@ -301,6 +315,12 @@ namespace P2PFileSharingApp.Network
                 }
             }
             catch (Exception ex) { Log($"❌ Lỗi download {relativePath}: {ex.Message}"); }
+            finally
+            {
+                // Restore timeout
+                stream.ReadTimeout = Timeout.Infinite;
+                stream.WriteTimeout = Timeout.Infinite;
+            }
         }
 
         private void HandleUpload(string relativePath, string sizeStr, NetworkStream stream, StreamWriter writer)
@@ -313,7 +333,24 @@ namespace P2PFileSharingApp.Network
                 writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Kích thước file không hợp lệ.");
                 return;
             }
-            writer.WriteLine($"{ProtocolMessages.RES_OK}|READY");
+
+            // Check for existing temporary file and its size
+            string tmpFilePath = fullPath + ".tmp";
+            long offset = 0;
+            if (File.Exists(tmpFilePath))
+            {
+                var tmpFi = new FileInfo(tmpFilePath);
+                if (tmpFi.Length < fileSize)
+                {
+                    offset = tmpFi.Length;
+                }
+            }
+
+            writer.WriteLine($"{ProtocolMessages.RES_OK}|READY|{offset}");
+
+            // Set dynamic timeout
+            stream.ReadTimeout = 15000;
+            stream.WriteTimeout = 15000;
 
             try
             {
@@ -327,6 +364,7 @@ namespace P2PFileSharingApp.Network
                     fullPath,
                     () => stream,
                     fileSize,
+                    offset,
                     (bytesReceived, total) =>
                     {
                         if (bytesReceived % (1024 * 1024) == 0 || bytesReceived == total)
@@ -354,6 +392,12 @@ namespace P2PFileSharingApp.Network
             {
                 writer.WriteLine($"{ProtocolMessages.RES_ERROR}|{ex.Message}");
                 Log($"❌ Lỗi upload {relativePath}: {ex.Message}");
+            }
+            finally
+            {
+                // Restore timeout
+                stream.ReadTimeout = Timeout.Infinite;
+                stream.WriteTimeout = Timeout.Infinite;
             }
         }
 
