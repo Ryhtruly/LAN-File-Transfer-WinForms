@@ -356,6 +356,24 @@ namespace P2PFileSharingApp.Network
 
         private void Log(string msg) => OnLog?.Invoke(msg);
 
+        public bool IsConnectionActive()
+        {
+            if (_client == null || !_client.Connected) return false;
+            try
+            {
+                if (_client.Client.Poll(0, SelectMode.SelectRead))
+                {
+                    byte[] buff = new byte[1];
+                    if (_client.Client.Receive(buff, SocketFlags.Peek) == 0)
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            catch { return false; }
+        }
+
         public void Dispose() => Disconnect();
     }
 }

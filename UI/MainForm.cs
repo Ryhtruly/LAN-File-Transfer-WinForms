@@ -48,6 +48,18 @@ public partial class MainForm : Form
     private bool isConnected;
     private bool serverRunning;
 
+    private System.Windows.Forms.Timer? connectionCheckTimer;
+
+    private class ConnectionRequest
+    {
+        public string Ip { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public P2PFileSharingApp.Core.PermissionLevel? Result { get; set; }
+        public System.Threading.ManualResetEventSlim ResetEvent { get; } = new(false);
+    }
+    private readonly Queue<ConnectionRequest> connectionQueue = new();
+    private bool isShowingConnectionDialog = false;
+
     private Panel pageHost = null!;
     private Button btnServerTab = null!;
     private Button btnClientTab = null!;
@@ -108,6 +120,9 @@ public partial class MainForm : Form
         LoadPeers();
         LoadLocalFiles();
         LoadServerFiles();
+
+        connectionCheckTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+        connectionCheckTimer.Tick += ConnectionCheckTimer_Tick;
 
         _serverWatcher = new FileSystemWatcher(P2PSharedRoot)
         {
@@ -379,8 +394,23 @@ public partial class MainForm : Form
         return ip.StartsWith("26.", StringComparison.Ordinal);
     }
 
+    private void ConnectionCheckTimer_Tick(object? sender, EventArgs e)
+    {
+        if (isConnected && _client != null && transferCts == null)
+        {
+            if (!_client.IsConnectionActive())
+            {
+                connectionCheckTimer?.Stop();
+                DisconnectFromRemoteServer();
+                MessageBox.Show(this, "Kết nối đến server thất bại do server không hoạt động hoặc đã bị dừng đột ngột.", "Lỗi kết nối", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        connectionCheckTimer?.Stop();
+        connectionCheckTimer?.Dispose();
         
         connectCts?.Cancel();
         transferCts?.Cancel();
@@ -1570,12 +1600,45 @@ public partial class MainForm : Form
 
     private P2PFileSharingApp.Core.PermissionLevel? RequestClientPermission(string ip, string displayName)
     {
-        if (InvokeRequired)
+        var req = new ConnectionRequest { Ip = ip, DisplayName = displayName };
+        Invoke(new Action(() =>
         {
-            return (P2PFileSharingApp.Core.PermissionLevel?)Invoke(
-                new Func<P2PFileSharingApp.Core.PermissionLevel?>(() => RequestClientPermission(ip, displayName)));
+            lock (connectionQueue)
+            {
+                connectionQueue.Enqueue(req);
+                if (!isShowingConnectionDialog)
+                {
+                    ProcessNextConnectionRequest();
+                }
+            }
+        }));
+        req.ResetEvent.Wait();
+        req.ResetEvent.Dispose();
+        return req.Result;
+    }
+
+    private void ProcessNextConnectionRequest()
+    {
+        ConnectionRequest? req = null;
+        lock (connectionQueue)
+        {
+            if (connectionQueue.Count > 0)
+            {
+                req = connectionQueue.Dequeue();
+                isShowingConnectionDialog = true;
+            }
+            else
+            {
+                isShowingConnectionDialog = false;
+                return;
+            }
         }
 
+        ShowConnectionDialog(req);
+    }
+
+    private void ShowConnectionDialog(ConnectionRequest req)
+    {
         using Form dialog = new()
         {
             Text = "Yêu cầu kết nối",
@@ -1593,7 +1656,7 @@ public partial class MainForm : Form
             Location = new Point(20, 15),
             MaximumSize = new Size(340, 0),
             AutoSize = true,
-            Text = $"Máy {displayName}\n({ip}) đang yêu cầu kết nối.",
+            Text = $"Máy {req.DisplayName}\n({req.Ip}) đang yêu cầu kết nối.",
             ForeColor = Ink,
             Font = new Font("Segoe UI Semibold", 10.5F),
             TextAlign = ContentAlignment.TopLeft
@@ -1601,7 +1664,7 @@ public partial class MainForm : Form
         dialog.Controls.Add(message);
 
         dialog.Controls.Add(new Label { Text = "Tên hiển thị:", Location = new Point(20, 78), AutoSize = true, ForeColor = Muted });
-        TextBox txtName = new() { Bounds = new Rectangle(110, 75, 240, 25), Text = displayName };
+        TextBox txtName = new() { Bounds = new Rectangle(110, 75, 240, 25), Text = req.DisplayName };
         dialog.Controls.Add(txtName);
 
         dialog.Controls.Add(new Label { Text = "Quyền hạn:", Location = new Point(20, 118), AutoSize = true, ForeColor = Muted });
@@ -1627,15 +1690,20 @@ public partial class MainForm : Form
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
-            AddServerLog($"Đã từ chối kết nối từ {ip}.", LogType.Info);
-            return null;
+            AddServerLog($"Đã từ chối kết nối từ {req.Ip}.", LogType.Info);
+            req.Result = null;
+        }
+        else
+        {
+            string permission = cboMode.SelectedItem?.ToString() ?? "Chỉ tải về";
+            string name = string.IsNullOrWhiteSpace(txtName.Text) ? req.Ip : txtName.Text.Trim();
+            UpsertPermissionRow(req.Ip, permission, name);
+            AddServerLog($"Đã cho phép {req.Ip} với quyền '{permission}'.", LogType.Success);
+            req.Result = PermissionTextToLevel(permission);
         }
 
-        string permission = cboMode.SelectedItem?.ToString() ?? "Chỉ tải về";
-        string name = string.IsNullOrWhiteSpace(txtName.Text) ? ip : txtName.Text.Trim();
-        UpsertPermissionRow(ip, permission, name);
-        AddServerLog($"Đã cho phép {ip} với quyền '{permission}'.", LogType.Success);
-        return PermissionTextToLevel(permission);
+        req.ResetEvent.Set();
+        ProcessNextConnectionRequest();
     }
 
     private void UpsertPermissionRow(string ip, string permission, string name)
@@ -1837,6 +1905,7 @@ public partial class MainForm : Form
             AddClientLog($"Đã kết nối thành công tới {peer.IpAddress}:{peer.Port}", LogType.Success);
 
             btnConnect.Text = "Ngắt kết nối";
+            connectionCheckTimer?.Start();
             await LoadRemoteFilesAsync();
         }
         catch (OperationCanceledException)
@@ -1870,6 +1939,7 @@ public partial class MainForm : Form
 
     private void DisconnectFromRemoteServer()
     {
+        connectionCheckTimer?.Stop();
         connectCts?.Cancel();
         transferCts?.Cancel();
         _client?.Disconnect();
