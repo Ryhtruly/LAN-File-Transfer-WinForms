@@ -141,6 +141,8 @@ namespace P2PFileSharingApp.Network
                     {
                         Log($"Kết nối từ {clientIP} đã bị từ chối.");
                         writer.WriteLine($"{ProtocolMessages.RES_DENIED}|Server đã từ chối kết nối.");
+                        writer.Flush();
+                        try { client.Client.Shutdown(SocketShutdown.Both); } catch {}
                         client.Close();
                         return;
                     }

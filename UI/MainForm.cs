@@ -1651,6 +1651,15 @@ public partial class MainForm : Form
             BackColor = PanelBack
         };
 
+        using System.Windows.Forms.Timer timeoutTimer = new() { Interval = 30000 };
+        timeoutTimer.Tick += (s, e) =>
+        {
+            timeoutTimer.Stop();
+            dialog.DialogResult = DialogResult.Cancel;
+            dialog.Close();
+        };
+        timeoutTimer.Start();
+
         Label message = new()
         {
             Location = new Point(20, 15),
@@ -1877,7 +1886,7 @@ public partial class MainForm : Form
         lblConnection.Text = "Đang kết nối...";
         lblConnection.ForeColor = Muted;
         lblConnection.BackColor = WarningSoft;
-        connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         try
         {
