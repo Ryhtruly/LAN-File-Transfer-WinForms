@@ -293,7 +293,7 @@ namespace P2PFileSharingApp.Network
             catch (Exception ex) { return (false, ex.Message); }
         }
 
-        public async Task<(bool ok, string msg)> UploadDirectoryAsync(string localDirPath, string remoteBaseDir)
+        public async Task<(bool ok, string msg)> UploadDirectoryAsync(string localDirPath, string remoteBaseDir, IProgress<P2PFileSharingApp.Models.TransferProgress>? progress = null, System.Threading.CancellationToken ct = default)
         {
             if (!Directory.Exists(localDirPath)) return (false, "Thư mục không tồn tại.");
             
@@ -309,14 +309,16 @@ namespace P2PFileSharingApp.Network
                 // 2. Upload all files in this directory
                 foreach (var file in dirInfo.GetFiles())
                 {
-                    var upRes = await UploadAsync(file.FullName, remoteDirPath);
+                    if (ct.IsCancellationRequested) return (false, "Đã hủy tải lên.");
+                    var upRes = await UploadAsync(file.FullName, remoteDirPath, progress, ct);
                     if (!upRes.ok) return (false, $"Lỗi tải file {file.Name}: {upRes.msg}");
                 }
 
                 // 3. Recursively upload subdirectories
                 foreach (var subDir in dirInfo.GetDirectories())
                 {
-                    var subRes = await UploadDirectoryAsync(subDir.FullName, remoteDirPath);
+                    if (ct.IsCancellationRequested) return (false, "Đã hủy tải lên.");
+                    var subRes = await UploadDirectoryAsync(subDir.FullName, remoteDirPath, progress, ct);
                     if (!subRes.ok) return subRes;
                 }
 

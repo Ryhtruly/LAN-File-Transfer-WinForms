@@ -2006,11 +2006,28 @@ public partial class MainForm : Form
         using OpenFileDialog ofd = new OpenFileDialog { Multiselect = true, Title = "Chọn file để tải lên" };
         if (ofd.ShowDialog() == DialogResult.OK)
         {
-            foreach (var file in ofd.FileNames)
+            SetTransferRunning(true);
+            transferCts = new CancellationTokenSource();
+            Progress<TransferProgress> progress = new(UpdateTransferProgress);
+            try
             {
-                var res = await _client.UploadAsync(file, currentRemotePath);
-                if (res.ok) AddClientLog(res.msg, LogType.Success);
-                else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
+                foreach (var file in ofd.FileNames)
+                {
+                    AddClientLog($"Bắt đầu tải lên: {Path.GetFileName(file)}", LogType.Info);
+                    var res = await _client.UploadAsync(file, currentRemotePath, progress, transferCts.Token);
+                    if (res.ok) AddClientLog(res.msg, LogType.Success);
+                    else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                AddClientLog("Đã hủy tải lên.", LogType.Error);
+            }
+            finally
+            {
+                transferCts?.Dispose();
+                transferCts = null;
+                SetTransferRunning(false);
             }
             await ReloadRemoteFilesAsync();
         }
@@ -2022,9 +2039,26 @@ public partial class MainForm : Form
         using FolderBrowserDialog fbd = new FolderBrowserDialog { Description = "Chọn thư mục để tải lên" };
         if (fbd.ShowDialog() == DialogResult.OK)
         {
-            var res = await _client.UploadDirectoryAsync(fbd.SelectedPath, currentRemotePath);
-            if (res.ok) AddClientLog(res.msg, LogType.Success);
-            else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
+            SetTransferRunning(true);
+            transferCts = new CancellationTokenSource();
+            Progress<TransferProgress> progress = new(UpdateTransferProgress);
+            try
+            {
+                AddClientLog($"Bắt đầu tải lên thư mục: {Path.GetFileName(fbd.SelectedPath)}", LogType.Info);
+                var res = await _client.UploadDirectoryAsync(fbd.SelectedPath, currentRemotePath, progress, transferCts.Token);
+                if (res.ok) AddClientLog(res.msg, LogType.Success);
+                else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
+            }
+            catch (OperationCanceledException)
+            {
+                AddClientLog("Đã hủy tải lên.", LogType.Error);
+            }
+            finally
+            {
+                transferCts?.Dispose();
+                transferCts = null;
+                SetTransferRunning(false);
+            }
             await ReloadRemoteFilesAsync();
         }
     }
@@ -2227,13 +2261,15 @@ public partial class MainForm : Form
 
     private void UpdateActionState()
     {
+        bool isTransferRunning = transferCts != null;
         bool hasSelection = lvRemoteFiles.SelectedItems.Count > 0;
 
-        btnUpload.Enabled = isConnected;
-        btnDownload.Enabled = isConnected && hasSelection;
-        btnDelete.Enabled = isConnected && hasSelection;
-        btnRenameRemoteFile.Enabled = isConnected && lvRemoteFiles.SelectedItems.Count == 1;
-        btnReloadRemote.Enabled = isConnected;
+        btnUpload.Enabled = isConnected && !isTransferRunning;
+        btnDownload.Enabled = isConnected && hasSelection && !isTransferRunning;
+        btnDelete.Enabled = isConnected && hasSelection && !isTransferRunning;
+        btnRenameRemoteFile.Enabled = isConnected && lvRemoteFiles.SelectedItems.Count == 1 && !isTransferRunning;
+        btnReloadRemote.Enabled = isConnected && !isTransferRunning;
+        lvRemoteFiles.AllowDrop = isConnected && !isTransferRunning;
     }
 
     private void lvRemoteFiles_DragEnter(object? sender, DragEventArgs e)
@@ -2258,20 +2294,38 @@ public partial class MainForm : Form
             return;
         }
 
-        foreach (string path in dropped)
+        SetTransferRunning(true);
+        transferCts = new CancellationTokenSource();
+        Progress<TransferProgress> progress = new(UpdateTransferProgress);
+        try
         {
-            if (Directory.Exists(path))
+            foreach (string path in dropped)
             {
-                var res = await _client.UploadDirectoryAsync(path, currentRemotePath);
-                if (res.ok) AddClientLog(res.msg, LogType.Success);
-                else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
+                if (Directory.Exists(path))
+                {
+                    AddClientLog($"Bắt đầu tải lên thư mục: {Path.GetFileName(path)}", LogType.Info);
+                    var res = await _client.UploadDirectoryAsync(path, currentRemotePath, progress, transferCts.Token);
+                    if (res.ok) AddClientLog(res.msg, LogType.Success);
+                    else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
+                }
+                else if (File.Exists(path))
+                {
+                    AddClientLog($"Bắt đầu tải lên file: {Path.GetFileName(path)}", LogType.Info);
+                    var res = await _client.UploadAsync(path, currentRemotePath, progress, transferCts.Token);
+                    if (res.ok) AddClientLog(res.msg, LogType.Success);
+                    else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
+                }
             }
-            else if (File.Exists(path))
-            {
-                var res = await _client.UploadAsync(path, currentRemotePath);
-                if (res.ok) AddClientLog(res.msg, LogType.Success);
-                else AddClientLog($"Lỗi tải lên: {res.msg}", LogType.Error);
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            AddClientLog("Đã hủy tải lên.", LogType.Error);
+        }
+        finally
+        {
+            transferCts?.Dispose();
+            transferCts = null;
+            SetTransferRunning(false);
         }
         await ReloadRemoteFilesAsync();
     }

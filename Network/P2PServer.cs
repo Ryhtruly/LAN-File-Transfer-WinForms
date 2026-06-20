@@ -386,6 +386,10 @@ namespace P2PFileSharingApp.Network
                     Log(result.Ok
                         ? $"✅ Upload hoàn tất: {relativePath}"
                         : $"⚠️ Upload lỗi: {relativePath}");
+                    if (result.Ok)
+                    {
+                        OnSharedFolderChanged?.Invoke();
+                    }
                 }
             }
             catch (Exception ex)
@@ -410,7 +414,10 @@ namespace P2PFileSharingApp.Network
             if (wasLocked)
                 writer.WriteLine($"{ProtocolMessages.RES_LOCKED}|Đang được người khác sử dụng, không thể xóa lúc này.");
             else if (ok)
+            {
                 writer.WriteLine($"{ProtocolMessages.RES_OK}|Đã xóa thành công.");
+                OnSharedFolderChanged?.Invoke();
+            }
             else
                 writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Không tồn tại hoặc không thể xóa.");
         }
@@ -424,7 +431,10 @@ namespace P2PFileSharingApp.Network
             if (wasLocked)
                 writer.WriteLine($"{ProtocolMessages.RES_LOCKED}|Đang được người khác sử dụng, không thể đổi tên.");
             else if (ok)
+            {
                 writer.WriteLine($"{ProtocolMessages.RES_OK}|Đổi tên thành công.");
+                OnSharedFolderChanged?.Invoke();
+            }
             else
                 writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Không thể đổi tên.");
         }
@@ -435,9 +445,15 @@ namespace P2PFileSharingApp.Network
             if (fullPath == null) { writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Đường dẫn không hợp lệ."); return; }
 
             bool ok = FileManager.CreateDirectory(fullPath);
-            writer.WriteLine(ok
-                ? $"{ProtocolMessages.RES_OK}|Tạo thư mục thành công."
-                : $"{ProtocolMessages.RES_ERROR}|Không thể tạo thư mục.");
+            if (ok)
+            {
+                writer.WriteLine($"{ProtocolMessages.RES_OK}|Tạo thư mục thành công.");
+                OnSharedFolderChanged?.Invoke();
+            }
+            else
+            {
+                writer.WriteLine($"{ProtocolMessages.RES_ERROR}|Không thể tạo thư mục.");
+            }
         }
 
         private void Log(string msg) => OnLog?.Invoke(msg);
