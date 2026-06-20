@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>Báo cáo phân tích giao diện PeerLink</title>
+  <style>
+    body {
+      font-family: "Times New Roman", serif;
+      font-size: 13pt;
+      line-height: 1.45;
+      color: #111827;
+      margin: 36px;
+    }
+    h1 {
+      text-align: center;
+      font-size: 20pt;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+    h2 {
+      font-size: 16pt;
+      margin-top: 22px;
+      margin-bottom: 8px;
+      color: #0f3f3f;
+    }
+    h3 {
+      font-size: 14pt;
+      margin-top: 14px;
+      margin-bottom: 6px;
+      color: #1f2937;
+    }
+    p {
+      margin: 6px 0;
+      text-align: justify;
+    }
+    ul, ol {
+      margin-top: 6px;
+      margin-bottom: 8px;
+    }
+    li {
+      margin: 4px 0;
+      text-align: justify;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 14px;
+      font-size: 12pt;
+    }
+    th, td {
+      border: 1px solid #9ca3af;
+      padding: 6px 8px;
+      vertical-align: top;
+    }
+    th {
+      background: #e7f0ef;
+      font-weight: bold;
+      text-align: left;
+    }
+    .meta {
+      text-align: center;
+      font-style: italic;
+      color: #4b5563;
+      margin-bottom: 24px;
+    }
+    .note {
+      background: #f3f4f6;
+      border-left: 4px solid #1f6f6e;
+      padding: 8px 10px;
+      margin: 10px 0;
+    }
+    .code {
+      font-family: Consolas, monospace;
+      font-size: 11pt;
+      color: #0f172a;
+    }
+  </style>
+</head>
+<body>
+  <h1>Báo cáo phân tích giao diện ứng dụng PeerLink</h1>
+  <p class="meta">Phân tích dựa trên mã nguồn thư mục E:\Thay_Bao, trọng tâm là giao diện WinForms trong UI\MainForm.cs.</p>
+
+  <h2>1. Tổng quan hệ thống và vai trò giao diện</h2>
+  <p>
+    PeerLink là ứng dụng chia sẻ file ngang hàng được xây dựng bằng C# WinForms trên nền .NET 8 Windows.
+    Giao diện không dùng file thiết kế kéo thả truyền thống mà được dựng trực tiếp bằng code trong lớp
+    <span class="code">MainForm</span>. Cách làm này giúp lập trình viên kiểm soát chính xác bố cục, màu sắc,
+    trạng thái và hành vi của từng thành phần giao diện.
+  </p>
+  <p>
+    Về nghiệp vụ, ứng dụng có hai vai trò chính: máy hiện tại có thể đóng vai trò server để chia sẻ thư mục
+    tài nguyên, đồng thời cũng có thể đóng vai trò client để kết nối đến server của máy khác. Giao diện phản ánh
+    đúng mô hình này bằng cách tách thành hai tab chức năng: <b>Server của mình</b> và <b>Kết nối server khác</b>.
+  </p>
+  <p>
+    Các lớp nền hỗ trợ giao diện gồm:
+  </p>
+  <ul>
+    <li><span class="code">Network\P2PServer.cs</span>: xử lý server TCP, nhận kết nối, phân quyền và thao tác file.</li>
+    <li><span class="code">Network\P2PClient.cs</span>: xử lý client TCP, gửi lệnh list, download, upload, delete, rename, mkdir.</li>
+    <li><span class="code">LanAutoDiscovery</span>: phát hiện server trong LAN hoặc Radmin VPN thông qua UDP broadcast và quét TCP.</li>
+    <li><span class="code">Core\FileManager.cs</span>: bảo vệ thao tác file, chống truy cập ra ngoài thư mục chia sẻ, khóa file khi đọc/ghi.</li>
+    <li><span class="code">Core\PermissionManager.cs</span>: quản lý quyền theo IP.</li>
+  </ul>
+  <p>
+    Vì vậy, giao diện không chỉ là lớp hiển thị mà còn là trung tâm điều phối luồng sử dụng: bật server, chọn
+    thư mục chia sẻ, duyệt file từ xa, cấp quyền, theo dõi log và quan sát tiến trình truyền file.
+  </p>
+
+  <h2>2. Định hướng thiết kế giao diện</h2>
+  <p>
+    Giao diện theo phong cách ứng dụng desktop tiện ích: ưu tiên rõ ràng, thao tác nhanh và khả năng quan sát
+    trạng thái hệ thống. Màu nền tổng thể là xám rất nhạt, các vùng chức năng dùng màu trắng gần tuyệt đối,
+    màu nhấn xanh teal dùng cho hành động chính và trạng thái đang hoạt động. Đây là lựa chọn phù hợp với phần
+    mềm quản lý file vì giảm cảm giác rối, đồng thời giúp người dùng tập trung vào bảng dữ liệu.
+  </p>
+  <table>
+    <tr>
+      <th>Thành phần thiết kế</th>
+      <th>Cách triển khai</th>
+      <th>Ý nghĩa trải nghiệm người dùng</th>
+    </tr>
+    <tr>
+      <td>Bảng màu</td>
+      <td>Nền xám nhạt, panel trắng, chữ đậm màu than, màu nhấn xanh teal, màu thành công xanh lá, màu lỗi đỏ.</td>
+      <td>Tạo cảm giác chuyên nghiệp, dễ đọc, phân biệt nhanh trạng thái thành công/lỗi/cảnh báo.</td>
+    </tr>
+    <tr>
+      <td>Typography</td>
+      <td>Segoe UI, tiêu đề dùng Semibold, cỡ chữ vừa phải.</td>
+      <td>Phù hợp chuẩn Windows, dễ nhìn trên màn hình desktop.</td>
+    </tr>
+    <tr>
+      <td>Layout</td>
+      <td>TableLayoutPanel, chia hàng/cột theo phần trăm và kích thước cố định.</td>
+      <td>Giữ bố cục ổn định khi resize cửa sổ, phù hợp giao diện nhiều dữ liệu.</td>
+    </tr>
+    <tr>
+      <td>Điều hướng</td>
+      <td>Hai tab rõ vai trò: server và client.</td>
+      <td>Giảm tải nhận thức vì người dùng biết mình đang thao tác với máy mình hay máy khác.</td>
+    </tr>
+    <tr>
+      <td>Phản hồi trạng thái</td>
+      <td>Label trạng thái, chấm màu server, progress bar, log theo thời gian.</td>
+      <td>Người dùng biết hệ thống đang chạy, đang kết nối, lỗi ở đâu và thao tác đã hoàn tất chưa.</td>
+    </tr>
+  </table>
+
+  <h2>3. Kiến trúc giao diện trong MainForm</h2>
+  <p>
+    Lớp <span class="code">MainForm</span> là trung tâm của giao diện. Hàm khởi tạo tạo thư mục mặc định,
+    khởi tạo server, service discovery, icon file, UI, watcher theo dõi thư mục chia sẻ, sau đó gắn event cho
+    server và client. Mô hình này có ưu điểm là toàn bộ trạng thái giao diện nằm trong một form duy nhất, dễ
+    trình bày trong báo cáo và dễ demo.
+  </p>
+  <p>
+    Hàm <span class="code">BuildUi()</span> tạo một shell gồm ba vùng: header, thanh tab và vùng nội dung.
+    Header hiển thị logo và tên ứng dụng PeerLink. Thanh tab chuyển đổi giữa hai view. Vùng nội dung
+    <span class="code">pageHost</span> chứa đồng thời server view và client view, sau đó ẩn/hiện theo tab đang chọn.
+  </p>
+  <p>
+    Việc dùng các hàm như <span class="code">BuildServerPage()</span>, <span class="code">BuildClientPage()</span>,
+    <span class="code">BuildConnectionPanel()</span>, <span class="code">BuildRemotePanel()</span> giúp chia giao diện
+    thành các khối chức năng độc lập. Đây là cách tổ chức tốt trong WinForms vì tránh để một hàm dựng UI quá dài
+    và giúp báo cáo có thể phân tích theo từng module.
+  </p>
+
+  <h2>4. Phân tích màn hình Server của mình</h2>
+  <h3>4.1. Vùng trạng thái server</h3>
+  <p>
+    Vùng đầu tiên của tab server cho biết thư mục root đang được chia sẻ và cung cấp các thao tác chính:
+    mở thư mục, thêm file, thêm thư mục và bật/tắt server. Trạng thái server được hiển thị bằng control riêng
+    <span class="code">ServerStatusIndicator</span>, gồm chữ trạng thái và chấm màu. Khi server dừng, chấm màu đỏ;
+    khi server chạy, chấm màu xanh. Cách biểu diễn này tốt vì người dùng không cần đọc log vẫn biết server đang
+    hoạt động hay chưa.
+  </p>
+  <p>
+    Thư mục chia sẻ mặc định là <span class="code">Documents\P2PSharedRoot</span>. Đây là quyết định hợp lý cho
+    người dùng phổ thông vì không yêu cầu cấu hình phức tạp. Các nút thêm file/thư mục thực chất copy dữ liệu
+    vào root, giúp server chỉ chia sẻ những gì nằm trong vùng kiểm soát.
+  </p>
+
+  <h3>4.2. Danh sách tài nguyên đang chia sẻ</h3>
+  <p>
+    Danh sách file dùng <span class="code">ListView</span> chế độ Details với các cột tên, loại, dung lượng và
+    thời điểm cập nhật. Giao diện có icon folder/file tự vẽ bằng GDI+, giúp người dùng phân biệt nhanh loại tài
+    nguyên. Các cột tự điều chỉnh theo kích thước control thông qua hàm <span class="code">FitFileColumns()</span>.
+  </p>
+  <p>
+    Điểm đáng chú ý là ứng dụng dùng <span class="code">FileSystemWatcher</span> để theo dõi thư mục chia sẻ.
+    Khi có file được tạo, xóa, sửa hoặc đổi tên, danh sách server được tải lại. Đây là chi tiết quan trọng khi
+    trình bày báo cáo vì giao diện có tính cập nhật gần thời gian thực, không chỉ là danh sách tĩnh.
+  </p>
+
+  <h3>4.3. Vùng phân quyền IP</h3>
+  <p>
+    Vùng phân quyền cho phép nhập IP, tên hiển thị và chọn mức quyền. Các quyền gồm: chỉ tải về, chỉ tải lên,
+    tải lên và tải về, toàn quyền. Mức quyền này được ánh xạ sang enum <span class="code">PermissionLevel</span>
+    trong <span class="code">PermissionManager</span>. Cách thiết kế theo IP rất phù hợp với mô hình LAN/Radmin VPN
+    vì mỗi máy có một địa chỉ IP rõ ràng.
+  </p>
+  <p>
+    Khi client kết nối, server mở hộp thoại xin xác nhận. Người dùng server có thể đặt tên và chọn quyền ngay
+    tại thời điểm kết nối. Đây là một quyết định UX tốt vì ngăn tình trạng máy lạ tự động truy cập tài nguyên.
+    Giao diện biến quyết định bảo mật thành một hành động rõ ràng: cho phép hoặc từ chối.
+  </p>
+
+  <h3>4.4. Nhật ký server</h3>
+  <p>
+    Log server được đặt ở cuối màn hình, hiển thị thời gian, loại log và nội dung. Các log thành công, lỗi và
+    thông tin dùng màu nền khác nhau. Với ứng dụng mạng P2P, log là yếu tố rất quan trọng vì người dùng cần biết
+    client nào kết nối, lệnh nào được gửi, file nào đang upload/download, và lỗi phát sinh ở đâu.
+  </p>
+
+  <h2>5. Phân tích màn hình Kết nối server khác</h2>
+  <h3>5.1. Vùng kết nối</h3>
+  <p>
+    Vùng kết nối cho phép chọn máy đã lưu, nhập tên hiển thị, nhập IP hoặc chọn server phát hiện được, nhập port,
+    lưu IP, quét LAN và kết nối. Port mặc định là <span class="code">8888</span>, đúng với server đang hardcode.
+    Trạng thái kết nối được hiển thị bằng label có màu nền: chưa kết nối, đang kết nối, kết nối thành công hoặc thất bại.
+  </p>
+  <p>
+    Điểm mạnh là giao diện hỗ trợ cả hai cách kết nối: tự động phát hiện server và nhập IP thủ công. Điều này đặc
+    biệt phù hợp với Radmin VPN vì UDP broadcast có thể không ổn định trên mọi máy; khi quét không thấy, người dùng
+    vẫn có thể nhập trực tiếp IP dạng 26.x.x.x.
+  </p>
+  <p>
+    Nút <b>Quét LAN</b> kết hợp hai kỹ thuật: nghe UDP discovery và quét TCP trong subnet. Khi phát hiện server,
+    ứng dụng ưu tiên IP Radmin VPN bằng cách nhận diện IP bắt đầu với <span class="code">26.</span>. Đây là chi tiết
+    kỹ thuật có giá trị trong báo cáo vì giao diện đã được thiết kế có tính đến môi trường test thực tế qua Radmin.
+  </p>
+
+  <h3>5.2. Vùng dữ liệu trên server đang kết nối</h3>
+  <p>
+    Sau khi kết nối, giao diện hiển thị danh sách file/thư mục từ server từ xa. Thanh công cụ phía trên dùng các
+    nút icon: upload, download, đổi tên, xóa, reload và hủy truyền file. Cách gom hành động gần danh sách file là
+    hợp lý vì người dùng chọn file rồi thao tác trực tiếp trên vùng đó.
+  </p>
+  <p>
+    Giao diện hỗ trợ double click vào thư mục để đi sâu, dùng mục <span class="code">..</span> để quay lại thư mục cha.
+    Ngoài ra còn hỗ trợ kéo thả file/thư mục từ File Explorer vào danh sách remote để upload. Đây là điểm UX mạnh,
+    vì thao tác drag-and-drop gần với thói quen quản lý file trên Windows.
+  </p>
+  <p>
+    Các nút thao tác được enable/disable theo trạng thái thông qua <span class="code">UpdateActionState()</span>.
+    Ví dụ chưa kết nối thì không upload/download được; chưa chọn file thì không download/xóa/đổi tên. Cơ chế này
+    giảm lỗi thao tác và giúp người dùng hiểu điều kiện sử dụng chức năng.
+  </p>
+
+  <h3>5.3. Vùng tiến trình truyền file</h3>
+  <p>
+    Vùng tiến trình gồm label mô tả file đang truyền và một progress bar tự vẽ <span class="code">RoundedProgressBar</span>.
+    Khi truyền file, giao diện cập nhật phần trăm, số byte đã truyền và tốc độ MB/s. Đây là thông tin quan trọng
+    trong bối cảnh P2P vì người dùng cần biết quá trình có đang chạy thật không, đặc biệt khi truyền file lớn qua VPN.
+  </p>
+  <p>
+    Việc tự vẽ progress bar giúp giao diện đồng bộ màu sắc với hệ thống thiết kế của app. Tuy nhiên, trong code hiện
+    tại control này thực chất vẽ thanh chữ nhật, chưa bo góc đúng như tên gọi. Nếu báo cáo có phần hạn chế, có thể
+    đề xuất hoàn thiện bo góc bằng <span class="code">GraphicsPath</span>.
+  </p>
+
+  <h3>5.4. Nhật ký kết nối</h3>
+  <p>
+    Nhật ký client giúp người dùng biết kết nối thành công hay thất bại, lệnh nào được gửi, server phản hồi gì,
+    quá trình upload/download đã hoàn tất chưa. Thiết kế log đồng nhất với server log giúp người dùng học một kiểu
+    đọc thông tin duy nhất cho toàn bộ ứng dụng.
+  </p>
+
+  <h2>6. Phân tích hệ thống component UI</h2>
+  <p>
+    Giao diện không dùng các control mặc định một cách thô sơ mà có nhiều helper để tạo ngôn ngữ thiết kế thống nhất:
+  </p>
+  <ul>
+    <li><span class="code">PrimaryButton()</span>: nút hành động chính, nền xanh teal, chữ trắng.</li>
+    <li><span class="code">SecondaryButton()</span>: nút phụ, nền xám xanh nhạt.</li>
+    <li><span class="code">IconButton()</span>: nút biểu tượng có tooltip và accessible name.</li>
+    <li><span class="code">StatusLabel()</span>: nhãn trạng thái có màu chữ và màu nền theo ngữ cảnh.</li>
+    <li><span class="code">CreateFileListView()</span>: bảng file thống nhất cho local/server/remote.</li>
+    <li><span class="code">CreateLogListView()</span>: bảng log thống nhất cho server và client.</li>
+    <li><span class="code">ApplyListViewChrome()</span>: owner-draw header, row, hover và selection.</li>
+  </ul>
+  <p>
+    Từ góc nhìn chuyên gia UI, đây là cách tiếp cận tốt vì tạo được design system nhỏ ngay trong WinForms.
+    Thay vì mỗi nút, mỗi bảng tự style riêng, các thành phần được tái sử dụng, giúp giao diện nhất quán và dễ bảo trì.
+  </p>
+
+  <h2>7. Luồng trải nghiệm người dùng</h2>
+  <h3>7.1. Luồng chia sẻ file</h3>
+  <ol>
+    <li>Người dùng mở tab Server của mình.</li>
+    <li>Thêm file hoặc thư mục vào thư mục root.</li>
+    <li>Bấm Bật server.</li>
+    <li>Quan sát trạng thái server chuyển sang đang chạy.</li>
+    <li>Khi client kết nối, popup yêu cầu cấp quyền xuất hiện.</li>
+    <li>Server chọn quyền và theo dõi log kết nối/truyền file.</li>
+  </ol>
+
+  <h3>7.2. Luồng kết nối và tải file</h3>
+  <ol>
+    <li>Người dùng mở tab Kết nối server khác.</li>
+    <li>Quét LAN hoặc nhập IP Radmin VPN thủ công.</li>
+    <li>Bấm Kết nối và chờ trạng thái phản hồi.</li>
+    <li>Sau khi được server chấp nhận, danh sách remote file hiển thị.</li>
+    <li>Người dùng chọn file để download hoặc upload file/thư mục lên server.</li>
+    <li>Quan sát progress và log để xác nhận kết quả.</li>
+  </ol>
+
+  <h2>8. Đánh giá điểm mạnh của giao diện</h2>
+  <ul>
+    <li><b>Phân tách vai trò rõ ràng:</b> Hai tab server/client giúp người dùng hiểu chính xác mình đang chia sẻ hay đang truy cập máy khác.</li>
+    <li><b>Trạng thái trực quan:</b> Chấm màu, label trạng thái, progress bar và log giúp hệ thống mạng trở nên dễ quan sát.</li>
+    <li><b>Tối ưu cho môi trường Radmin VPN:</b> Giao diện cho phép quét tự động nhưng vẫn hỗ trợ nhập IP thủ công, ưu tiên IP 26.x.x.x.</li>
+    <li><b>Quản lý quyền ngay trong UI:</b> Server có thể quyết định quyền của từng client theo IP, phù hợp yêu cầu an toàn khi chia sẻ file.</li>
+    <li><b>Bảng file thân thiện:</b> Có icon file/folder, cột dung lượng, thời gian cập nhật, hover và selection rõ ràng.</li>
+    <li><b>Hỗ trợ thao tác tự nhiên:</b> Có drag-and-drop upload, double click vào thư mục, nút reload và nút hủy truyền file.</li>
+    <li><b>Nhất quán thiết kế:</b> Các helper tạo button, label, listview giúp giao diện có ngôn ngữ thị giác thống nhất.</li>
+  </ul>
+
+  <h2>9. Hạn chế và điểm có thể cải thiện</h2>
+  <ul>
+    <li><b>Mã giao diện tập trung quá nhiều trong MainForm:</b> Toàn bộ layout, event, xử lý nghiệp vụ UI và trạng thái cùng nằm trong một file lớn. Về lâu dài nên tách thành các user control như ServerPage, ClientPage, LogPanel, FileListPanel.</li>
+    <li><b>Port server đang hardcode 8888:</b> Giao diện client có NumericUpDown cho port nhưng server luôn bật ở 8888. Nên bổ sung ô cấu hình port ở tab server để linh hoạt khi trùng cổng.</li>
+    <li><b>Một số biểu tượng dùng ký tự text:</b> Các nút icon như R, mũi tên, dấu x có tooltip nhưng chưa trực quan bằng icon chuẩn. Có thể dùng bộ icon thống nhất để tăng tính chuyên nghiệp.</li>
+    <li><b>Progress bar chưa thật sự bo góc:</b> Tên class là RoundedProgressBar nhưng phần vẽ hiện tại là hình chữ nhật. Có thể dùng GraphicsPath để đúng tên và đẹp hơn.</li>
+    <li><b>Thông báo lỗi chủ yếu nằm trong log:</b> Với lỗi quan trọng như không kết nối được, firewall chặn, sai IP, nên có thông báo nổi bật hơn hoặc gợi ý xử lý ngay trên giao diện.</li>
+    <li><b>Chưa có breadcrumb cho thư mục remote:</b> Khi đi sâu vào thư mục server, người dùng chưa thấy rõ đường dẫn hiện tại ngoài dữ liệu nội bộ currentRemotePath. Nên hiển thị breadcrumb hoặc label đường dẫn.</li>
+    <li><b>Chưa lưu danh sách peer bền vững trong source hiện tại:</b> BindingList peers được dùng cho ComboBox nhưng phần load/save thực tế chưa rõ ràng. Nên lưu vào JSON để lần sau mở lại vẫn còn máy đã kết nối.</li>
+  </ul>
+
+  <h2>10. Nhận xét chuyên gia về tính phù hợp báo cáo/demo</h2>
+  <p>
+    Giao diện hiện tại phù hợp để báo cáo đồ án vì thể hiện được đầy đủ các chức năng quan trọng của hệ thống P2P:
+    bật server, phát hiện server, kết nối, cấp quyền, xem danh sách file, upload/download, đổi tên, xóa, tạo thư mục,
+    theo dõi log và tiến trình. Đặc biệt, UI phản ánh rõ các khái niệm mạng phía sau như IP, port, client/server,
+    quyền truy cập và trạng thái kết nối.
+  </p>
+  <p>
+    Về mặt trải nghiệm, ứng dụng ưu tiên tính thực dụng hơn tính trình diễn. Đây là định hướng đúng cho phần mềm
+    chia sẻ file nội bộ, vì người dùng cần thao tác chính xác và quan sát lỗi nhanh. Các bảng dữ liệu, log và thanh
+    trạng thái là những thành phần phù hợp với ngữ cảnh kỹ thuật.
+  </p>
+  <p>
+    Khi thuyết trình, nên nhấn mạnh rằng giao diện không chỉ để bấm nút mà còn là công cụ giám sát hoạt động mạng:
+    server biết ai đang kết nối, client biết trạng thái kết nối, hai bên đều thấy tiến trình truyền file và thông báo
+    lỗi. Đây là điểm giúp ứng dụng có tính hoàn chỉnh hơn so với một demo truyền file đơn giản.
+  </p>
+
+  <h2>11. Gợi ý trình bày trong báo cáo</h2>
+  <ul>
+    <li>Giới thiệu PeerLink là ứng dụng WinForms P2P hai vai trò: server và client.</li>
+    <li>Trình bày ảnh hoặc mô tả tab Server của mình: thư mục root, bật server, danh sách file, phân quyền, log.</li>
+    <li>Trình bày tab Kết nối server khác: quét LAN/Radmin, nhập IP, kết nối, danh sách remote file, toolbar thao tác.</li>
+    <li>Giải thích cơ chế phản hồi trạng thái: màu sắc, progress, log, popup cấp quyền.</li>
+    <li>Liên hệ UI với backend: nút bật server gọi P2PServer, nút kết nối gọi P2PClient, quét LAN dùng LanAutoDiscovery, phân quyền dùng PermissionManager.</li>
+    <li>Kết luận giao diện đã đáp ứng mục tiêu dễ sử dụng, dễ quan sát, phù hợp demo qua Radmin VPN.</li>
+  </ul>
+
+  <h2>12. Kết luận</h2>
+  <p>
+    Giao diện PeerLink được thiết kế theo hướng rõ ràng, thực dụng và phù hợp với ứng dụng chia sẻ file trong mạng
+    LAN/Radmin VPN. Cấu trúc hai tab giúp phân tách nhiệm vụ server và client; hệ thống bảng, log, trạng thái và
+    progress giúp người dùng kiểm soát quá trình truyền file. Dù còn có thể cải thiện về tách component, cấu hình
+    port, icon và breadcrumb, giao diện hiện tại đã đủ hoàn chỉnh để phục vụ demo và báo cáo kỹ thuật.
+  </p>
+</body>
+</html>
